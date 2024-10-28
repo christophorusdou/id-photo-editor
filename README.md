@@ -35,3 +35,9 @@ A simple web application that allows users to upload a photo, crop, and remove t
     ```bash
     pip install Flask Pillow torchvision scikit-image transformers
     ```
+
+4. Start the application:
+
+    ```bash
+    python app.py
+    ```
