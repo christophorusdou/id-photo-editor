@@ -55,7 +55,7 @@ def remove_background():
 
 @app.route('/')
 def index():
-  return render_template('index.html')  # Serves index.html from the templates folder
+  return render_template('index.html')
 
 
 if __name__ == '__main__':
