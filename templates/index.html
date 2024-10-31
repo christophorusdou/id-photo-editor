@@ -7,44 +7,40 @@
             rel="stylesheet"
             href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css"
         />
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                text-align: center;
-                padding: 20px;
-            }
-            .zoom-buttons {
-                margin-top: 10px;
-            }
-            #image-container {
-                width: 600px;
-                height: 400px;
-                margin: 20px auto;
-            }
-            img {
-                max-width: 100%;
-                max-height: 100%;
-                display: block;
-            }
-            button {
-                padding: 10px 20px;
-                margin: 10px;
-            }
-        </style>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500&display=swap"
+            rel="stylesheet"
+        />
+        <link
+            rel="stylesheet"
+            href="{{ url_for('static', filename='style.css') }}"
+        />
     </head>
     <body>
         <h1>Photo ID Generator</h1>
-        <input type="file" id="imageInput" accept="image/*" />
-        <br />
-        <label for="width">Width:</label>
-        <input type="number" id="width" placeholder="inches/cm" step="0.1" />
-        <label for="height">Height:</label>
-        <input type="number" id="height" placeholder="inches/cm" step="0.1" />
-        <select id="unit">
-            <option value="inches">Inches</option>
-            <option value="cm">Centimeters</option>
-        </select>
-        <br />
+        <div class="input-group">
+            <input type="file" id="imageInput" accept="image/*" />
+        </div>
+        <div class="input-group">
+            <label for="width">Width:</label>
+            <input
+                type="number"
+                id="width"
+                placeholder="inches/cm"
+                step="0.1"
+            />
+            <label for="height">Height:</label>
+            <input
+                type="number"
+                id="height"
+                placeholder="inches/cm"
+                step="0.1"
+            />
+            <select id="unit">
+                <option value="inches">Inches</option>
+                <option value="cm">Centimeters</option>
+            </select>
+        </div>
         <div id="image-container">
             <img id="image" src="#" alt="Your Image" style="display: none" />
         </div>
@@ -52,233 +48,16 @@
             <button id="zoom-in" disabled>Zoom In</button>
             <button id="zoom-out" disabled>Zoom Out</button>
         </div>
-        <button id="toggle-mode" disabled>Move Crop Window</button>
-        <button id="toggle-cursor" disabled>
-            Toggle Cursor (Move Crop Box)
-        </button>
-        <button id="remove-bg-button" disabled>Remove Background</button>
-        <button id="crop-button" disabled>Crop & Save</button>
-
+        <div>
+            <button id="toggle-mode" disabled>Move Crop Window</button>
+            <button id="toggle-cursor" disabled>Toggle Cursor</button>
+            <button id="remove-bg-button" disabled>Remove Background</button>
+            <button id="crop-button" disabled>Crop & Save</button>
+            <button id="generate-4x6-button" disabled>Generate 4x6 Layout</button>
+        </div>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
-        <script>
-            let cropper;
-            let isMovingCropWindow = false;
-            let isCropBoxMode = true;
-            const imageInput = document.getElementById("imageInput");
-            const image = document.getElementById("image");
-            const removeBgButton = document.getElementById("remove-bg-button");
-            const cropButton = document.getElementById("crop-button");
-            const widthInput = document.getElementById("width");
-            const heightInput = document.getElementById("height");
-            const unitSelect = document.getElementById("unit");
-            const zoomInButton = document.getElementById("zoom-in");
-            const zoomOutButton = document.getElementById("zoom-out");
-            const toggleModeButton = document.getElementById("toggle-mode");
-            const toggleCursorButton = document.getElementById("toggle-cursor");
-
-            const DPI = 300; // Define DPI for conversion
-
-            function convertToPixels(value, unit) {
-                return unit === "inches" ? value * DPI : (value * DPI) / 2.54;
-            }
-
-            // function initializeCropper() {
-            //     if (cropper) cropper.destroy(); // Remove existing cropper instance
-            //     const widthValue = parseFloat(widthInput.value);
-            //     const heightValue = parseFloat(heightInput.value);
-            //     if (
-            //         !isNaN(widthValue) &&
-            //         !isNaN(heightValue) &&
-            //         widthValue > 0 &&
-            //         heightValue > 0
-            //     ) {
-            //         cropper = new Cropper(image, {
-            //             aspectRatio: widthValue / heightValue,
-            //             dragMode: "crop", // Start with crop mode to move the crop box
-            //             zoomOnWheel: false, // Disable default zoom on wheel
-            //         });
-            //         cropButton.disabled = false;
-            //         zoomInButton.disabled = false;
-            //         zoomOutButton.disabled = false;
-            //         toggleModeButton.disabled = false;
-            //         toggleCursorButton.disabled = false;
-
-            //         // Custom zoom handling for smoother experience
-            //         image.addEventListener("wheel", (event) => {
-            //             event.preventDefault(); // Prevent the default scroll behavior
-            //             const zoomFactor = 0.02; // Adjust this value for smoothness
-            //             const delta =
-            //                 event.deltaY > 0 ? -zoomFactor : zoomFactor;
-            //             cropper.zoom(delta);
-            //         });
-            //     }
-            // }
-
-            function initializeCropper() {
-                if (cropper) cropper.destroy(); // Remove existing cropper instance
-                const widthValue = parseFloat(widthInput.value);
-                const heightValue = parseFloat(heightInput.value);
-                if (
-                    !isNaN(widthValue) &&
-                    !isNaN(heightValue) &&
-                    widthValue > 0 &&
-                    heightValue > 0
-                ) {
-                    cropper = new Cropper(image, {
-                        aspectRatio: widthValue / heightValue,
-                        dragMode: "crop", // Start with crop mode to move the crop box
-                    });
-                    cropButton.disabled = false;
-                    zoomInButton.disabled = false;
-                    zoomOutButton.disabled = false;
-                    toggleModeButton.disabled = false;
-                    toggleCursorButton.disabled = false;
-                }
-
-                // Adaptive zoom handling
-                image.addEventListener("wheel", (event) => {
-                    event.preventDefault(); // Prevent default scroll behavior
-
-                    // Adjust zoomFactor based on scroll speed (deltaY)
-                    let baseZoomFactor = 0.02; // Base zoom for slow scrolls
-                    let speedFactor = Math.abs(event.deltaY) / 100; // Increase factor based on scroll speed
-                    let zoomFactor = Math.min(
-                        baseZoomFactor * speedFactor,
-                        0.1
-                    ); // Limit zoom factor for control
-
-                    // Zoom in or out based on scroll direction
-                    const delta = event.deltaY > 0 ? -zoomFactor : zoomFactor;
-                    cropper.zoom(delta);
-                });
-            }
-
-            imageInput.addEventListener("change", () => {
-                const file = imageInput.files[0];
-                const reader = new FileReader();
-                reader.onload = () => {
-                    image.src = reader.result;
-                    image.style.display = "block";
-                    removeBgButton.disabled = false;
-                };
-                reader.readAsDataURL(file);
-            });
-
-            removeBgButton.addEventListener("click", async () => {
-                const formData = new FormData();
-                formData.append("image", imageInput.files[0]);
-
-                const response = await fetch("/remove_background", {
-                    method: "POST",
-                    body: formData,
-                });
-                const blob = await response.blob();
-                const url = URL.createObjectURL(blob);
-
-                image.src = url;
-                initializeCropper();
-            });
-
-            // Reinitialize cropper when width, height, or unit changes
-            widthInput.addEventListener("input", initializeCropper);
-            heightInput.addEventListener("input", initializeCropper);
-            unitSelect.addEventListener("change", initializeCropper);
-
-            // Zoom functionality
-            zoomInButton.addEventListener("click", () => {
-                if (cropper) cropper.zoom(0.1); // Zoom in by 10%
-            });
-
-            zoomOutButton.addEventListener("click", () => {
-                if (cropper) cropper.zoom(-0.1); // Zoom out by 10%
-            });
-
-            // Toggle between moving image or crop window
-            toggleModeButton.addEventListener("click", () => {
-                isMovingCropWindow = !isMovingCropWindow;
-                toggleModeButton.textContent = isMovingCropWindow
-                    ? "Move Image"
-                    : "Move Crop Window";
-            });
-
-            // Toggle cursor between moving crop box and moving image
-            toggleCursorButton.addEventListener("click", () => {
-                isCropBoxMode = !isCropBoxMode;
-                cropper.setDragMode(isCropBoxMode ? "crop" : "move");
-                toggleCursorButton.textContent = isCropBoxMode
-                    ? "Toggle Cursor (Move Crop Box)"
-                    : "Toggle Cursor (Move Image)";
-            });
-
-            // Keyboard arrow keys for moving image or crop window
-            document.addEventListener("keydown", (event) => {
-                const step = 10; // Movement step in pixels
-
-                if (!cropper) return;
-
-                if (isMovingCropWindow) {
-                    // Move crop window
-                    const data = cropper.getData(); // Get the current position of the crop box
-                    switch (event.key) {
-                        case "ArrowUp":
-                            data.y -= step;
-                            break;
-                        case "ArrowDown":
-                            data.y += step;
-                            break;
-                        case "ArrowLeft":
-                            data.x -= step;
-                            break;
-                        case "ArrowRight":
-                            data.x += step;
-                            break;
-                        default:
-                            return;
-                    }
-                    cropper.setData(data); // Set the new position of the crop box
-                } else {
-                    // Move image
-                    switch (event.key) {
-                        case "ArrowUp":
-                            cropper.move(0, -step); // Move image up
-                            break;
-                        case "ArrowDown":
-                            cropper.move(0, step); // Move image down
-                            break;
-                        case "ArrowLeft":
-                            cropper.move(-step, 0); // Move image left
-                            break;
-                        case "ArrowRight":
-                            cropper.move(step, 0); // Move image right
-                            break;
-                        default:
-                            return;
-                    }
-                }
-            });
-
-            cropButton.addEventListener("click", () => {
-                const width = convertToPixels(
-                    parseFloat(widthInput.value),
-                    unitSelect.value
-                );
-                const height = convertToPixels(
-                    parseFloat(heightInput.value),
-                    unitSelect.value
-                );
-                const croppedCanvas = cropper.getCroppedCanvas({
-                    width,
-                    height,
-                });
-
-                croppedCanvas.toBlob((blob) => {
-                    const croppedUrl = URL.createObjectURL(blob);
-                    const link = document.createElement("a");
-                    link.href = croppedUrl;
-                    link.download = "photo_id.png";
-                    link.click();
-                }, "image/png");
-            });
-        </script>
+        <script src="{{ url_for('static', filename='app.js') }}"></script>
+        <!DOCTYPE html>
+       </html>
     </body>
 </html>
