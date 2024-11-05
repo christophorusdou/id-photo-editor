@@ -1,6 +1,8 @@
+import { getModelDownloaded, setImageSelected } from "./state.js";
 let cropper;
 let isMovingCropWindow = false;
 let isCropBoxMode = true;
+
 const imageInput = document.getElementById("imageInput");
 const image = document.getElementById("image");
 const removeBgButton = document.getElementById("remove-bg-button");
@@ -51,7 +53,7 @@ function convertToPixels(value, unit) {
 //     }
 // }
 
-function initializeCropper() {
+export function initializeCropper() {
     if (cropper) cropper.destroy(); // Remove existing cropper instance
     const widthValue = parseFloat(widthInput.value);
     const heightValue = parseFloat(heightInput.value);
@@ -94,25 +96,28 @@ imageInput.addEventListener("change", () => {
     reader.onload = () => {
         image.src = reader.result;
         image.style.display = "block";
-        removeBgButton.disabled = false;
+        setImageSelected(true);
+        if (getModelDownloaded()) {
+            removeBgButton.disabled = false;
+        }
     };
     reader.readAsDataURL(file);
 });
 
-removeBgButton.addEventListener("click", async () => {
-    const formData = new FormData();
-    formData.append("image", imageInput.files[0]);
+// removeBgButton.addEventListener("click", async () => {
+//     const formData = new FormData();
+//     formData.append("image", imageInput.files[0]);
 
-    const response = await fetch("/remove_background", {
-        method: "POST",
-        body: formData,
-    });
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
+//     const response = await fetch("/remove_background", {
+//         method: "POST",
+//         body: formData,
+//     });
+//     const blob = await response.blob();
+//     const url = URL.createObjectURL(blob);
 
-    image.src = url;
-    initializeCropper();
-});
+//     image.src = url;
+//     initializeCropper();
+// });
 
 // Reinitialize cropper when width, height, or unit changes
 widthInput.addEventListener("input", initializeCropper);

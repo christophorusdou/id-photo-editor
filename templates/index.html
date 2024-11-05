@@ -53,11 +53,22 @@
             <button id="toggle-cursor" disabled>Toggle Cursor</button>
             <button id="remove-bg-button" disabled>Remove Background</button>
             <button id="crop-button" disabled>Crop & Save</button>
-            <button id="generate-4x6-button" disabled>Generate 4x6 Layout</button>
+            <button id="generate-4x6-button" disabled>
+                Generate 4x6 Layout
+            </button>
+        </div>
+        <div id="status-container">
+            <div id="spinner" class="spinner"></div>
+            <p id="status">Initializing...</p>
         </div>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
-        <script src="{{ url_for('static', filename='app.js') }}"></script>
-        <!DOCTYPE html>
-       </html>
+        <script
+            type="module"
+            src="{{ url_for('static', filename='app.js') }}"
+        ></script>
+        <script
+            type="module"
+            src="{{ url_for('static', filename='rmbg.js') }}"
+        ></script>
     </body>
 </html>
