@@ -1,0 +1,7 @@
+Flask>=3.0
+flask-cors>=4.0
+Pillow>=10.0
+transformers>=4.40
+torch>=2.0
+torchvision>=0.15
+scikit-image>=0.21
