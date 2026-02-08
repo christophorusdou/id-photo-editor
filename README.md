@@ -1,43 +1,58 @@
 # Photo ID Generator
 
-A simple web application that allows users to upload a photo, crop, and remove the background using briaai/RMBG-1.4.
+A web application for uploading photos, cropping them to ID/passport dimensions, removing backgrounds with AI, and exporting print-ready layouts. Runs entirely in the browser — no server required.
 
 ## Features
 
--   Remove the background using briaai/RMBG-1.4.
+- Upload and crop photos to any ID/passport dimension (inches or cm)
+- AI background removal powered by [briaai/RMBG-1.4](https://huggingface.co/briaai/RMBG-1.4), running directly in your browser
+- Generate print-ready 4x6 inch layouts tiled with cropped photos
+- Adaptive zoom, keyboard navigation, and drag controls
+- Optional GPU-accelerated backend for faster inference
 
-## Installation
+## Quick Start
 
-### Prerequisites
+No installation needed. Open `index.html` in a modern browser, or serve the files:
 
--   Python 3.x < 3.13
--   pip
--   Virtual environment (recommended)
+```bash
+python3 -m http.server 8000
+```
 
-### Setup
+Then visit `http://localhost:8000`.
 
-1. Clone the repository:
+The ~45MB background removal model downloads automatically on first use and is cached by the browser.
 
-    ```bash
-    git clone <repository-url>
-    cd <repository-directory>
-    ```
+## Deployment (Cloudflare Pages)
 
-2. Create a virtual environment:
+This is a static site with no build step.
 
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
-    ```
+1. Connect your GitHub repo to [Cloudflare Pages](https://pages.cloudflare.com/)
+2. Set the build output directory to `/` (root)
+3. Leave the build command empty — there is no build step
+4. Deploy
 
-3. Install the required packages:
+## Optional: GPU Backend
 
-    ```bash
-    pip install Flask Pillow torchvision scikit-image transformers
-    ```
+For faster background removal on a machine with a GPU:
 
-4. Start the application:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
 
-    ```bash
-    python app.py
-    ```
+Then select **Backend Server** in the mode selector on the page. The server runs on `http://localhost:5000` by default.
+
+Environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RMBG_MODEL` | `briaai/RMBG-1.4` | Hugging Face model ID |
+| `RMBG_DEVICE` | `0` | GPU device index |
+| `FLASK_DEBUG` | `0` | Set to `1` for debug mode |
+| `PORT` | `5000` | Server port |
+
+## License
+
+GPLv3 — see [LICENSE](LICENSE).

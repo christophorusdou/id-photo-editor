@@ -1,10 +1,3 @@
-import {
-    AutoModel,
-    AutoProcessor,
-    env,
-    RawImage,
-} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3";
-
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -15,7 +8,6 @@ const CONFIG = {
     ARROW_STEP: 10,
     BASE_ZOOM: 0.02,
     MAX_ZOOM: 0.1,
-    MODEL_ID: "briaai/RMBG-1.4",
     BACKEND_URL: "/remove_background",
 };
 
@@ -25,9 +17,8 @@ const CONFIG = {
 let cropper = null;
 let isMovingCropWindow = false;
 let isCropBoxMode = true;
-let model = null;
-let processor = null;
-let modelLoading = false;
+let worker = null;
+let modelReady = false;
 
 // ---------------------------------------------------------------------------
 // DOM Elements
@@ -44,6 +35,7 @@ const zoomOutButton = document.getElementById("zoom-out");
 const toggleModeButton = document.getElementById("toggle-mode");
 const toggleCursorButton = document.getElementById("toggle-cursor");
 const generate4x6Button = document.getElementById("generate-4x6-button");
+const preloadButton = document.getElementById("preload-model-button");
 const statusBar = document.getElementById("status-bar");
 const statusText = document.getElementById("status-text");
 const progressContainer = document.getElementById("progress-container");
@@ -89,7 +81,6 @@ async function checkBackend() {
             signal: controller.signal,
         });
         clearTimeout(timeout);
-        // A 400 (missing image) means the server is alive
         if (response.status === 400 || response.ok) {
             backendStatus.textContent = "(available)";
             backendStatus.className = "backend-available";
@@ -104,93 +95,104 @@ async function checkBackend() {
 }
 
 // ---------------------------------------------------------------------------
-// In-browser model loading
+// Web Worker for in-browser inference
 // ---------------------------------------------------------------------------
-async function loadBrowserModel() {
-    if (model && processor) return;
-    if (modelLoading) return;
-    modelLoading = true;
+function getWorker() {
+    if (!worker) {
+        worker = new Worker("static/worker.js", { type: "module" });
+    }
+    return worker;
+}
 
-    env.allowLocalModels = false;
-    env.backends.onnx.wasm.proxy = true;
+function sendWorkerMessage(msg) {
+    return new Promise((resolve, reject) => {
+        const w = getWorker();
 
+        function onMessage(e) {
+            const { type } = e.data;
+            if (type === "progress") {
+                showProgress(e.data.percent);
+                return; // keep listening
+            }
+            w.removeEventListener("message", onMessage);
+            w.removeEventListener("error", onError);
+            if (type === "error") {
+                reject(new Error(e.data.message));
+            } else {
+                resolve(e.data);
+            }
+        }
+
+        function onError(e) {
+            w.removeEventListener("message", onMessage);
+            w.removeEventListener("error", onError);
+            reject(new Error(e.message || "Worker error"));
+        }
+
+        w.addEventListener("message", onMessage);
+        w.addEventListener("error", onError);
+        w.postMessage(msg);
+    });
+}
+
+async function preloadModel() {
+    if (modelReady) {
+        showStatus("Model already loaded.", "success");
+        setTimeout(hideStatus, 2000);
+        return;
+    }
     showStatus("Loading background removal model...", "info");
     showProgress(0);
-
     try {
-        model = await AutoModel.from_pretrained(CONFIG.MODEL_ID, {
-            config: { model_type: "custom" },
-            progress_callback: (p) => {
-                if (p.status === "progress" && p.total) {
-                    showProgress(Math.round((p.loaded / p.total) * 100));
-                }
-            },
-        });
-
-        processor = await AutoProcessor.from_pretrained(CONFIG.MODEL_ID, {
-            config: {
-                do_normalize: true,
-                do_pad: false,
-                do_rescale: true,
-                do_resize: true,
-                image_mean: [0.5, 0.5, 0.5],
-                image_std: [1, 1, 1],
-                resample: 2,
-                rescale_factor: 0.00392156862745098,
-                size: { width: 1024, height: 1024 },
-            },
-        });
-
-        showStatus("Model loaded.", "success");
+        await sendWorkerMessage({ type: "load-model" });
+        modelReady = true;
+        preloadButton.textContent = "Model Loaded";
+        preloadButton.disabled = true;
+        showStatus("Model loaded and ready.", "success");
         setTimeout(hideStatus, 2000);
     } catch (err) {
         showStatus("Failed to load model: " + err.message, "error");
-        model = null;
-        processor = null;
-        throw err;
-    } finally {
-        modelLoading = false;
     }
 }
 
 // ---------------------------------------------------------------------------
-// Background removal — browser
+// Background removal — browser (via worker)
 // ---------------------------------------------------------------------------
 async function removeBackgroundBrowser(imgElement) {
-    await loadBrowserModel();
+    if (!modelReady) {
+        showStatus("Loading background removal model...", "info");
+        showProgress(0);
+        await sendWorkerMessage({ type: "load-model" });
+        modelReady = true;
+        preloadButton.textContent = "Model Loaded";
+        preloadButton.disabled = true;
+    }
 
     showStatus("Removing background...", "info");
 
-    const rawImage = await RawImage.fromURL(imgElement.src);
-    const { pixel_values } = await processor(rawImage);
-    const { output } = await model({ input: pixel_values });
-
-    // Build alpha mask
-    const maskData = output[0].mul(255).to("uint8");
-    const mask = await RawImage.fromTensor(maskData).resize(
-        rawImage.width,
-        rawImage.height,
-    );
+    const result = await sendWorkerMessage({
+        type: "inference",
+        imageDataUrl: imgElement.src,
+    });
 
     // Composite onto white background via canvas
+    const { maskData, width, height } = result;
     const canvas = document.createElement("canvas");
-    canvas.width = rawImage.width;
-    canvas.height = rawImage.height;
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext("2d");
 
-    // Draw white background
+    // White background
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, width, height);
 
-    // Draw original image with mask as alpha
+    // Draw original image onto temp canvas, apply mask as alpha
     const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = rawImage.width;
-    tempCanvas.height = rawImage.height;
+    tempCanvas.width = width;
+    tempCanvas.height = height;
     const tempCtx = tempCanvas.getContext("2d");
 
-    // Draw original image
     const origImg = new Image();
-    origImg.crossOrigin = "anonymous";
     await new Promise((resolve, reject) => {
         origImg.onload = resolve;
         origImg.onerror = reject;
@@ -198,11 +200,9 @@ async function removeBackgroundBrowser(imgElement) {
     });
     tempCtx.drawImage(origImg, 0, 0);
 
-    // Apply mask to alpha channel
-    const imageData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
-    const maskPixels = mask.data;
-    for (let i = 0; i < maskPixels.length; i++) {
-        imageData.data[i * 4 + 3] = maskPixels[i]; // Set alpha from mask
+    const imageData = tempCtx.getImageData(0, 0, width, height);
+    for (let i = 0; i < maskData.length; i++) {
+        imageData.data[i * 4 + 3] = maskData[i];
     }
     tempCtx.putImageData(imageData, 0, 0);
 
@@ -289,6 +289,9 @@ imageInput.addEventListener("change", () => {
     };
     reader.readAsDataURL(file);
 });
+
+// Pre-load model
+preloadButton.addEventListener("click", preloadModel);
 
 // Remove background
 removeBgButton.addEventListener("click", async () => {

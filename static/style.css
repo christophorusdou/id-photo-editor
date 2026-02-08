@@ -85,6 +85,11 @@ h1 {
     color: #c62828;
     font-size: 0.8rem;
 }
+.preload-button {
+    padding: 6px 14px;
+    font-size: 0.8rem;
+    margin: 0;
+}
 
 /* ---- Inputs ---- */
 .input-group {
