@@ -3,7 +3,57 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Photo ID Generator</title>
+        <title>Photo ID Generator — Free Passport & ID Photos in Seconds</title>
+        <meta name="description" content="Create passport and ID photos instantly. AI-powered background removal, smart cropping, and print-ready 4x6 layouts — 100% free, private, and runs entirely in your browser." />
+        <link rel="canonical" href="https://id-photo-editor.cdrift.com/" />
+        <meta name="robots" content="index, follow" />
+
+        <!-- Open Graph -->
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="Photo ID Generator — Free Passport & ID Photos" />
+        <meta property="og:description" content="Create passport and ID photos instantly. AI background removal, smart cropping, and print-ready exports — 100% free and private." />
+        <meta property="og:url" content="https://id-photo-editor.cdrift.com/" />
+        <meta property="og:site_name" content="Photo ID Generator" />
+        <meta property="og:image" content="https://id-photo-editor.cdrift.com/og-image.png" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+
+        <!-- Twitter Card -->
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Photo ID Generator — Free Passport & ID Photos" />
+        <meta name="twitter:description" content="Create passport and ID photos instantly. AI background removal, smart cropping, and print-ready exports — 100% free and private." />
+        <meta name="twitter:image" content="https://id-photo-editor.cdrift.com/og-image.png" />
+
+        <!-- Theme & Icons -->
+        <meta name="theme-color" content="#2563eb" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="manifest" href="/manifest.json" />
+
+        <!-- Structured Data -->
+        <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "WebApplication",
+            "name": "Photo ID Generator",
+            "url": "https://id-photo-editor.cdrift.com/",
+            "description": "Create passport and ID photos in seconds. AI-powered background removal, smart cropping, and print-ready 4x6 layouts — runs entirely in your browser.",
+            "applicationCategory": "PhotographyApplication",
+            "operatingSystem": "Any (browser-based)",
+            "offers": {
+                "@type": "Offer",
+                "price": "0",
+                "priceCurrency": "USD"
+            },
+            "featureList": [
+                "AI background removal",
+                "Smart cropping with presets",
+                "4x6 print layout generation",
+                "300 DPI export",
+                "100% client-side processing"
+            ]
+        }
+        </script>
+
         <link
             rel="stylesheet"
             href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css"
@@ -15,7 +65,58 @@
         <link rel="stylesheet" href="static/style.css" />
     </head>
     <body>
-        <div class="app-shell">
+        <!-- Landing Page -->
+        <div class="landing" id="landing">
+            <div class="landing-inner">
+                <div class="landing-hero">
+                    <div class="landing-badge">100% Free &amp; Private</div>
+                    <h1 class="landing-title">Photo ID Generator</h1>
+                    <p class="landing-tagline">Create passport and ID photos in seconds. AI background removal, smart cropping, and print-ready exports &mdash; all running in your browser.</p>
+                    <button class="btn-primary landing-cta" id="get-started" type="button">
+                        Get Started
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    </button>
+                </div>
+
+                <div class="landing-features">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        </div>
+                        <h3>Your Photos Stay Private</h3>
+                        <p>Everything runs locally in your browser. Your images are never uploaded to any server &mdash; they never leave your device.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+                        </div>
+                        <h3>AI-Powered</h3>
+                        <p>State-of-the-art background removal powered by machine learning, running entirely via WebAssembly in your browser.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        </div>
+                        <h3>Completely Free</h3>
+                        <p>No sign-ups, no watermarks, no limits. Use it as many times as you need, forever.</p>
+                    </div>
+                </div>
+
+                <footer class="landing-footer">
+                    <div class="landing-footer-links">
+                        <a href="https://buymeacoffee.com/cdrift77" target="_blank" rel="noopener" class="footer-link coffee-link">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+                            Buy me a coffee
+                        </a>
+                        <span class="footer-sep">&middot;</span>
+                        <a href="https://cdrift77.com" target="_blank" rel="noopener" class="footer-link">Contact</a>
+                    </div>
+                </footer>
+            </div>
+        </div>
+
+        <!-- App (hidden until Get Started) -->
+        <div class="app-shell hidden" id="app-shell">
             <header class="app-header">
                 <h1 class="app-title">Photo ID Generator</h1>
                 <button class="btn-icon" id="settings-toggle" aria-label="Settings">
@@ -266,7 +367,7 @@
                     </div>
                 </div>
             </div>
-        </div>
+        </div> <!-- /app-shell -->
 
         <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
         <script type="module" src="static/app.js"></script>

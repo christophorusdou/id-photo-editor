@@ -1,0 +1,16 @@
+{
+  "name": "Photo ID Generator",
+  "short_name": "Photo ID",
+  "description": "Create passport and ID photos in seconds. AI background removal, smart cropping, and print-ready exports — all in your browser.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f4f9",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

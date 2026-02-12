@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /static/worker.js
+
+Sitemap: https://id-photo-editor.cdrift.com/sitemap.xml

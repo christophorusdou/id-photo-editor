@@ -48,6 +48,9 @@ let lastBlobUrl = null;
 const $ = (id) => document.getElementById(id);
 
 const dom = {
+    landing: $("landing"),
+    appShell: $("app-shell"),
+    getStarted: $("get-started"),
     stepProgress: $("step-progress"),
 
     statusToast: $("status-toast"),
@@ -969,6 +972,11 @@ function attachEventListeners() {
 // ---------------------------------------------------------------------------
 // Initialization
 // ---------------------------------------------------------------------------
+dom.getStarted.addEventListener("click", () => {
+    dom.landing.classList.add("hidden");
+    dom.appShell.classList.remove("hidden");
+});
+
 setupDropZone();
 attachEventListeners();
 updateProgressIndicator();
