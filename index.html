@@ -27,7 +27,11 @@
         <!-- Theme & Icons -->
         <meta name="theme-color" content="#2563eb" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="manifest" href="/manifest.json" />
+
+        <!-- Redirect pages.dev → canonical domain -->
+        <script>if(location.hostname.endsWith('.pages.dev'))location.replace('https://id-photo-editor.cdrift.com'+location.pathname+location.search);</script>
 
         <!-- Structured Data -->
         <script type="application/ld+json">
