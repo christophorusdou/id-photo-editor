@@ -2,6 +2,7 @@
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Photo ID Generator</title>
         <link
             rel="stylesheet"
@@ -11,13 +12,31 @@
             href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500&display=swap"
             rel="stylesheet"
         />
-        <link
-            rel="stylesheet"
-            href="{{ url_for('static', filename='style.css') }}"
-        />
+        <link rel="stylesheet" href="static/style.css" />
     </head>
     <body>
         <h1>Photo ID Generator</h1>
+
+        <div id="status-bar" class="status-bar hidden">
+            <span id="status-text"></span>
+            <div id="progress-container" class="hidden">
+                <div id="progress-bar"></div>
+            </div>
+        </div>
+
+        <div id="mode-selector" class="mode-selector">
+            <label>
+                <input type="radio" name="inference-mode" value="browser" checked />
+                Browser (no server needed)
+            </label>
+            <label>
+                <input type="radio" name="inference-mode" value="backend" />
+                Backend Server
+            </label>
+            <span id="backend-status"></span>
+            <button id="preload-model-button" class="preload-button">Pre-load Model</button>
+        </div>
+
         <div class="input-group">
             <input type="file" id="imageInput" accept="image/*" />
         </div>
@@ -28,6 +47,7 @@
                 id="width"
                 placeholder="inches/cm"
                 step="0.1"
+                min="0.1"
             />
             <label for="height">Height:</label>
             <input
@@ -35,6 +55,7 @@
                 id="height"
                 placeholder="inches/cm"
                 step="0.1"
+                min="0.1"
             />
             <select id="unit">
                 <option value="inches">Inches</option>
@@ -48,7 +69,7 @@
             <button id="zoom-in" disabled>Zoom In</button>
             <button id="zoom-out" disabled>Zoom Out</button>
         </div>
-        <div>
+        <div class="action-buttons">
             <button id="toggle-mode" disabled>Move Crop Window</button>
             <button id="toggle-cursor" disabled>Toggle Cursor</button>
             <button id="remove-bg-button" disabled>Remove Background</button>
@@ -56,8 +77,6 @@
             <button id="generate-4x6-button" disabled>Generate 4x6 Layout</button>
         </div>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
-        <script src="{{ url_for('static', filename='app.js') }}"></script>
-        <!DOCTYPE html>
-       </html>
+        <script type="module" src="static/app.js"></script>
     </body>
 </html>

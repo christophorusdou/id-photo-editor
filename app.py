@@ -1,62 +1,59 @@
-from flask import Flask, render_template, request, jsonify, send_file
-from transformers import pipeline
-from PIL import Image
+"""
+Optional backend server for Photo ID Generator.
+
+Provides GPU-accelerated background removal via briaai/RMBG-1.4.
+The frontend works without this server (uses in-browser inference),
+but this backend is faster when a GPU is available.
+
+Usage:
+    pip install -r requirements.txt
+    python app.py
+"""
+
 import io
-import requests
+import os
 
-app = Flask(__name__)
+from flask import Flask, send_file, request, jsonify
+from flask_cors import CORS
+from PIL import Image
+from transformers import pipeline
 
-# Load the model pipeline
-pipe = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True, device=0)
+app = Flask(__name__, static_folder="static", static_url_path="/static")
+CORS(app)
 
-# @app.route('/remove_background', methods=['POST'])
-# def remove_background():
-#     if 'image' not in request.files:
-#         return jsonify({"error": "No image provided"}), 400
+MODEL_ID = os.environ.get("RMBG_MODEL", "briaai/RMBG-1.4")
+DEVICE = int(os.environ.get("RMBG_DEVICE", "0"))
 
-#     # Load the image
-#     file = request.files['image']
-#     image = Image.open(file)
-
-#     # Perform background removal
-#     result_image = pipe(image)
-
-#     # Save result to an in-memory file
-#     img_io = io.BytesIO()
-#     result_image.save(img_io, 'PNG')
-#     img_io.seek(0)
-
-#     return send_file(img_io, mimetype='image/png')
+pipe = pipeline("image-segmentation", model=MODEL_ID, trust_remote_code=True, device=DEVICE)
 
 
-@app.route('/remove_background', methods=['POST'])
+@app.route("/")
+def index():
+    return send_file("index.html")
+
+
+@app.route("/remove_background", methods=["POST"])
 def remove_background():
-    if 'image' not in request.files:
+    if "image" not in request.files:
         return jsonify({"error": "No image provided"}), 400
 
-    # Load and process the image
-    file = request.files['image']
+    file = request.files["image"]
     image = Image.open(file)
 
-    # Perform background removal
     result_image = pipe(image)
 
-    # Convert to RGB and add a white background
     result_image = result_image.convert("RGBA")
     white_bg = Image.new("RGBA", result_image.size, (255, 255, 255, 255))
     result_image = Image.alpha_composite(white_bg, result_image).convert("RGB")
 
-    # Save to in-memory file
     img_io = io.BytesIO()
-    result_image.save(img_io, 'PNG')
+    result_image.save(img_io, "PNG")
     img_io.seek(0)
 
-    return send_file(img_io, mimetype='image/png')
-
-@app.route('/')
-def index():
-  return render_template('index.html')
+    return send_file(img_io, mimetype="image/png")
 
 
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(debug=debug, port=port)
