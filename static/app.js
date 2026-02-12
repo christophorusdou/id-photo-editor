@@ -19,6 +19,8 @@ let isMovingCropWindow = false;
 let isCropBoxMode = true;
 let worker = null;
 let modelReady = false;
+let wheelHandler = null;
+let lastBlobUrl = null;
 
 // ---------------------------------------------------------------------------
 // DOM Elements
@@ -235,7 +237,11 @@ async function removeBackgroundBackend(file) {
     }
 
     const blob = await response.blob();
-    return URL.createObjectURL(blob);
+    if (lastBlobUrl) {
+        URL.revokeObjectURL(lastBlobUrl);
+    }
+    lastBlobUrl = URL.createObjectURL(blob);
+    return lastBlobUrl;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +249,10 @@ async function removeBackgroundBackend(file) {
 // ---------------------------------------------------------------------------
 function initializeCropper() {
     if (cropper) cropper.destroy();
+    if (wheelHandler) {
+        image.removeEventListener("wheel", wheelHandler);
+        wheelHandler = null;
+    }
 
     const widthValue = parseFloat(widthInput.value);
     const heightValue = parseFloat(heightInput.value);
@@ -264,13 +274,14 @@ function initializeCropper() {
     generate4x6Button.disabled = false;
 
     // Adaptive zoom handling
-    image.addEventListener("wheel", (event) => {
+    wheelHandler = (event) => {
         event.preventDefault();
         const speedFactor = Math.abs(event.deltaY) / 100;
         const zoomFactor = Math.min(CONFIG.BASE_ZOOM * speedFactor, CONFIG.MAX_ZOOM);
         const delta = event.deltaY > 0 ? -zoomFactor : zoomFactor;
         cropper.zoom(delta);
-    });
+    };
+    image.addEventListener("wheel", wheelHandler);
 }
 
 // ---------------------------------------------------------------------------
@@ -432,6 +443,15 @@ generate4x6Button.addEventListener("click", () => {
         link.download = "photo_id_4x6.png";
         link.click();
     }, "image/png");
+});
+
+// Re-check backend availability when switching inference mode
+document.querySelectorAll('input[name="inference-mode"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+        if (radio.value === "backend") {
+            checkBackend();
+        }
+    });
 });
 
 // ---------------------------------------------------------------------------

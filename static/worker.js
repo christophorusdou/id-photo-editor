@@ -3,7 +3,7 @@ import {
     AutoProcessor,
     env,
     RawImage,
-} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3";
+} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2";
 
 env.allowLocalModels = false;
 
@@ -18,33 +18,39 @@ async function loadModel(data) {
         return;
     }
 
-    model = await AutoModel.from_pretrained(MODEL_ID, {
-        config: { model_type: "custom" },
-        progress_callback: (p) => {
-            if (p.status === "progress" && p.total) {
-                self.postMessage({
-                    type: "progress",
-                    percent: Math.round((p.loaded / p.total) * 100),
-                });
-            }
-        },
-    });
+    try {
+        model = await AutoModel.from_pretrained(MODEL_ID, {
+            config: { model_type: "custom" },
+            progress_callback: (p) => {
+                if (p.status === "progress" && p.total) {
+                    self.postMessage({
+                        type: "progress",
+                        percent: Math.round((p.loaded / p.total) * 100),
+                    });
+                }
+            },
+        });
 
-    processor = await AutoProcessor.from_pretrained(MODEL_ID, {
-        config: {
-            do_normalize: true,
-            do_pad: false,
-            do_rescale: true,
-            do_resize: true,
-            image_mean: [0.5, 0.5, 0.5],
-            image_std: [1, 1, 1],
-            resample: 2,
-            rescale_factor: 0.00392156862745098,
-            size: { width: 1024, height: 1024 },
-        },
-    });
+        processor = await AutoProcessor.from_pretrained(MODEL_ID, {
+            config: {
+                do_normalize: true,
+                do_pad: false,
+                do_rescale: true,
+                do_resize: true,
+                image_mean: [0.5, 0.5, 0.5],
+                image_std: [1, 1, 1],
+                resample: 2,
+                rescale_factor: 0.00392156862745098,
+                size: { width: 1024, height: 1024 },
+            },
+        });
 
-    self.postMessage({ type: "model-ready" });
+        self.postMessage({ type: "model-ready" });
+    } catch (err) {
+        model = null;
+        processor = null;
+        throw err;
+    }
 }
 
 async function runInference(data) {

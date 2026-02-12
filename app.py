@@ -24,7 +24,12 @@ CORS(app)
 MODEL_ID = os.environ.get("RMBG_MODEL", "briaai/RMBG-1.4")
 DEVICE = int(os.environ.get("RMBG_DEVICE", "0"))
 
-pipe = pipeline("image-segmentation", model=MODEL_ID, trust_remote_code=True, device=DEVICE)
+try:
+    pipe = pipeline("image-segmentation", model=MODEL_ID, trust_remote_code=True, device=DEVICE)
+except Exception as e:
+    print(f"WARNING: Failed to load model on device {DEVICE}: {e}")
+    print("Falling back to CPU (this will be slower).")
+    pipe = pipeline("image-segmentation", model=MODEL_ID, trust_remote_code=True, device=-1)
 
 
 @app.route("/")
