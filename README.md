@@ -22,14 +22,17 @@ Then visit `http://localhost:8000`.
 
 The ~45MB background removal model downloads automatically on first use and is cached by the browser.
 
-## Deployment (Cloudflare Pages)
+## Deployment
 
-This is a static site with no build step.
+Production is hosted on **Cloudflare Pages** at [id-photo-editor.cdrift.com](https://id-photo-editor.cdrift.com).
 
-1. Connect your GitHub repo to [Cloudflare Pages](https://pages.cloudflare.com/)
-2. Set the build output directory to `/` (root)
-3. Leave the build command empty — there is no build step
-4. Deploy
+This is a static site with no build step. Deploy via the Wrangler CLI:
+
+```bash
+npx wrangler pages deploy . --project-name id-photo-editor --branch main --commit-dirty=true
+```
+
+The Cloudflare Pages project name is `id-photo-editor`, with custom domain `id-photo-editor.cdrift.com` configured via the Cloudflare dashboard.
 
 ## Optional: GPU Backend
 

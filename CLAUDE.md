@@ -54,7 +54,18 @@ Select "Backend Server" mode in the UI. Requires a GPU.
 
 ### Deployment
 
-Deployed as a static site on Cloudflare Pages. No build step — just point to the repo root.
+Deployed as a static site on **Cloudflare Pages**.
+
+- **Production URL:** https://id-photo-editor.cdrift.com
+- **Pages URL:** https://id-photo-editor.pages.dev
+- **Project name:** `id-photo-editor`
+- **Custom domain:** `id-photo-editor.cdrift.com` (CNAME configured in Cloudflare dashboard)
+- **Build step:** None — static files served from repo root
+
+Deploy via CLI:
+```bash
+npx wrangler pages deploy . --project-name id-photo-editor --branch main --commit-dirty=true
+```
 
 ## Architecture
 
