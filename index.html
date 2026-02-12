@@ -9,73 +9,265 @@
             href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css"
         />
         <link
-            href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
             rel="stylesheet"
         />
         <link rel="stylesheet" href="static/style.css" />
     </head>
     <body>
-        <h1>Photo ID Generator</h1>
+        <div class="app-shell">
+            <header class="app-header">
+                <h1 class="app-title">Photo ID Generator</h1>
+                <button class="btn-icon" id="settings-toggle" aria-label="Settings">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                </button>
+            </header>
 
-        <div id="status-bar" class="status-bar hidden">
-            <span id="status-text"></span>
-            <div id="progress-container" class="hidden">
-                <div id="progress-bar"></div>
+            <nav class="step-progress" id="step-progress">
+                <div class="step-item active" data-step="1">
+                    <div class="step-dot">1</div>
+                    <span class="step-label">Upload</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" data-step="2">
+                    <div class="step-dot">2</div>
+                    <span class="step-label">Background</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" data-step="3">
+                    <div class="step-dot">3</div>
+                    <span class="step-label">Adjust</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" data-step="4">
+                    <div class="step-dot">4</div>
+                    <span class="step-label">Crop</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" data-step="5">
+                    <div class="step-dot">5</div>
+                    <span class="step-label">Export</span>
+                </div>
+            </nav>
+
+            <div id="status-toast" class="status-toast hidden">
+                <span id="status-text"></span>
+                <div id="progress-container" class="hidden">
+                    <div id="progress-bar"></div>
+                </div>
+            </div>
+
+            <main class="wizard-viewport">
+                <!-- Step 1: Upload -->
+                <section class="wizard-step active" data-step="1">
+                    <div class="step-content">
+                        <h2 class="step-title">Upload Your Photo</h2>
+                        <p class="step-subtitle">Choose a well-lit photo with a plain background</p>
+                        <div class="drop-zone" id="drop-zone">
+                            <div class="drop-zone-prompt" id="drop-zone-prompt">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="17 8 12 3 7 8"/>
+                                    <line x1="12" y1="3" x2="12" y2="15"/>
+                                </svg>
+                                <p>Drag & drop your photo here</p>
+                                <span class="drop-zone-or">or</span>
+                                <button class="btn-primary btn-sm" id="browse-button" type="button">Browse Files</button>
+                            </div>
+                            <div class="upload-preview hidden" id="upload-preview">
+                                <img id="preview-image" alt="Preview" />
+                                <button class="btn-text" id="change-photo" type="button">Change Photo</button>
+                            </div>
+                            <input type="file" id="imageInput" accept="image/*" hidden />
+                        </div>
+                    </div>
+                    <div class="step-actions">
+                        <div></div>
+                        <button class="btn-primary" id="step1-next" disabled>Continue</button>
+                    </div>
+                </section>
+
+                <!-- Step 2: Remove Background -->
+                <section class="wizard-step" data-step="2">
+                    <div class="step-content">
+                        <h2 class="step-title">Remove Background</h2>
+                        <p class="step-subtitle">AI-powered background removal for a clean ID photo</p>
+                        <div class="before-after">
+                            <div class="ba-panel">
+                                <span class="ba-label">Original</span>
+                                <img id="ba-before" alt="Before" />
+                            </div>
+                            <div class="ba-panel">
+                                <span class="ba-label">Result</span>
+                                <div id="ba-after-container">
+                                    <img id="ba-after" alt="After" class="hidden" />
+                                    <div id="ba-placeholder" class="ba-placeholder">
+                                        <p>Click "Remove Background" to process</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="step2-actions">
+                            <button class="btn-primary" id="remove-bg-button" type="button">Remove Background</button>
+                        </div>
+                    </div>
+                    <div class="step-actions">
+                        <button class="btn-ghost" id="step2-back" type="button">Back</button>
+                        <div class="step-actions-right">
+                            <button class="btn-text" id="step2-skip" type="button">Skip</button>
+                            <button class="btn-primary" id="step2-next" disabled>Continue</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 3: Adjust -->
+                <section class="wizard-step" data-step="3">
+                    <div class="step-content">
+                        <h2 class="step-title">Adjust Photo</h2>
+                        <p class="step-subtitle">Fine-tune brightness, contrast, and color</p>
+                        <div class="adjust-layout">
+                            <div class="adjust-preview">
+                                <canvas id="adjust-canvas"></canvas>
+                            </div>
+                            <div class="adjust-controls">
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="brightness-slider">Brightness</label>
+                                        <span class="slider-value" id="brightness-value">100%</span>
+                                    </div>
+                                    <input type="range" id="brightness-slider" min="50" max="150" value="100" />
+                                </div>
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="contrast-slider">Contrast</label>
+                                        <span class="slider-value" id="contrast-value">100%</span>
+                                    </div>
+                                    <input type="range" id="contrast-slider" min="50" max="150" value="100" />
+                                </div>
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="saturation-slider">Saturation</label>
+                                        <span class="slider-value" id="saturation-value">100%</span>
+                                    </div>
+                                    <input type="range" id="saturation-slider" min="0" max="200" value="100" />
+                                </div>
+                                <button class="btn-ghost btn-sm" id="reset-adjustments" type="button">Reset</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="step-actions">
+                        <button class="btn-ghost" id="step3-back" type="button">Back</button>
+                        <button class="btn-primary" id="step3-next">Continue</button>
+                    </div>
+                </section>
+
+                <!-- Step 4: Crop -->
+                <section class="wizard-step" data-step="4">
+                    <div class="step-content">
+                        <h2 class="step-title">Crop to Size</h2>
+                        <p class="step-subtitle">Choose a preset or enter custom dimensions</p>
+                        <div class="crop-controls">
+                            <div class="crop-preset-row">
+                                <select id="preset-select">
+                                    <option value="">Custom</option>
+                                </select>
+                                <div class="crop-dimensions">
+                                    <input type="number" id="width" placeholder="Width" step="0.1" min="0.1" />
+                                    <span class="dim-x">&times;</span>
+                                    <input type="number" id="height" placeholder="Height" step="0.1" min="0.1" />
+                                    <select id="unit">
+                                        <option value="inches">in</option>
+                                        <option value="cm">cm</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="crop-container" id="crop-container">
+                            <img id="image" alt="Crop" style="display:none" />
+                        </div>
+                        <div class="crop-toolbar">
+                            <button class="btn-icon" id="zoom-in" title="Zoom In" disabled type="button">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                            </button>
+                            <button class="btn-icon" id="zoom-out" title="Zoom Out" disabled type="button">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                            </button>
+                            <button class="btn-ghost btn-sm" id="toggle-mode" disabled type="button">Move Crop</button>
+                        </div>
+                    </div>
+                    <div class="step-actions">
+                        <button class="btn-ghost" id="step4-back" type="button">Back</button>
+                        <button class="btn-primary" id="step4-next" disabled>Continue</button>
+                    </div>
+                </section>
+
+                <!-- Step 5: Export -->
+                <section class="wizard-step" data-step="5">
+                    <div class="step-content">
+                        <h2 class="step-title">Export Your Photo</h2>
+                        <p class="step-subtitle">Download your ID photo or generate a print layout</p>
+                        <div class="export-preview">
+                            <canvas id="export-canvas"></canvas>
+                        </div>
+                        <div class="export-cards">
+                            <div class="export-card">
+                                <div class="export-card-icon">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                                </div>
+                                <h3>Single Photo</h3>
+                                <p>Download your cropped ID photo</p>
+                                <button class="btn-primary" id="crop-button" type="button">Download Photo</button>
+                            </div>
+                            <div class="export-card">
+                                <div class="export-card-icon">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="9" height="9" rx="1"/><rect x="13" y="2" width="9" height="9" rx="1"/><rect x="2" y="13" width="9" height="9" rx="1"/><rect x="13" y="13" width="9" height="9" rx="1"/></svg>
+                                </div>
+                                <h3>4&times;6 Print Layout</h3>
+                                <p>Tiled layout for printing at home</p>
+                                <button class="btn-primary" id="generate-4x6-button" type="button">Download Layout</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="step-actions">
+                        <button class="btn-ghost" id="step5-back" type="button">Back</button>
+                        <button class="btn-primary" id="step5-start-over" type="button">Start Over</button>
+                    </div>
+                </section>
+            </main>
+
+            <!-- Settings Drawer -->
+            <div class="settings-overlay hidden" id="settings-overlay"></div>
+            <div class="settings-drawer hidden" id="settings-drawer">
+                <div class="settings-header">
+                    <h3>Settings</h3>
+                    <button class="btn-icon" id="settings-close" aria-label="Close" type="button">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+                <div class="settings-body">
+                    <div class="setting-group">
+                        <label class="setting-label">Background Removal Engine</label>
+                        <div class="radio-group">
+                            <label class="radio-option">
+                                <input type="radio" name="inference-mode" value="browser" checked />
+                                <span>Browser (no server needed)</span>
+                            </label>
+                            <label class="radio-option">
+                                <input type="radio" name="inference-mode" value="backend" />
+                                <span>Backend Server <span id="backend-status" class="badge"></span></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <button class="btn-ghost btn-sm" id="preload-model-button" type="button">Pre-load Model</button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div id="mode-selector" class="mode-selector">
-            <label>
-                <input type="radio" name="inference-mode" value="browser" checked />
-                Browser (no server needed)
-            </label>
-            <label>
-                <input type="radio" name="inference-mode" value="backend" />
-                Backend Server
-            </label>
-            <span id="backend-status"></span>
-            <button id="preload-model-button" class="preload-button">Pre-load Model</button>
-        </div>
-
-        <div class="input-group">
-            <input type="file" id="imageInput" accept="image/*" />
-        </div>
-        <div class="input-group">
-            <label for="width">Width:</label>
-            <input
-                type="number"
-                id="width"
-                placeholder="inches/cm"
-                step="0.1"
-                min="0.1"
-            />
-            <label for="height">Height:</label>
-            <input
-                type="number"
-                id="height"
-                placeholder="inches/cm"
-                step="0.1"
-                min="0.1"
-            />
-            <select id="unit">
-                <option value="inches">Inches</option>
-                <option value="cm">Centimeters</option>
-            </select>
-        </div>
-        <div id="image-container">
-            <img id="image" src="#" alt="Your Image" style="display: none" />
-        </div>
-        <div class="zoom-buttons">
-            <button id="zoom-in" disabled>Zoom In</button>
-            <button id="zoom-out" disabled>Zoom Out</button>
-        </div>
-        <div class="action-buttons">
-            <button id="toggle-mode" disabled>Move Crop Window</button>
-            <button id="toggle-cursor" disabled>Toggle Cursor</button>
-            <button id="remove-bg-button" disabled>Remove Background</button>
-            <button id="crop-button" disabled>Crop & Save</button>
-            <button id="generate-4x6-button" disabled>Generate 4x6 Layout</button>
-        </div>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
         <script type="module" src="static/app.js"></script>
     </body>
