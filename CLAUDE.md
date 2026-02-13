@@ -2,27 +2,30 @@
 
 ## Project Overview
 
-Photo ID Generator — a static web application for uploading photos, cropping them to ID/passport dimensions, removing backgrounds using AI, and exporting print-ready layouts. Runs entirely in the browser with no server required. Licensed under GPLv3.
+Photo ID Generator — a static web application for uploading photos, cropping them to ID/passport dimensions, removing backgrounds using AI, and exporting print-ready layouts. Features a one-click pipeline with auto face detection, smart cropping, and compliance checking. Runs entirely in the browser with no server required. Licensed under GPLv3.
 
 ## Tech Stack
 
 - **Frontend:** Vanilla JavaScript (ES modules), HTML, CSS — no framework, no build step
 - **Image Cropping:** CropperJS v1.5.12 (loaded from CDN)
-- **Background Removal (browser):** Transformers.js (`@huggingface/transformers` v3) with `briaai/RMBG-1.4` ONNX model, runs via WebAssembly in-browser
+- **Background Removal (browser):** Transformers.js (`@huggingface/transformers` v3) with `onnx-community/BiRefNet_lite` ONNX model (Apache 2.0), runs via WebAssembly in-browser
+- **Face Detection:** MediaPipe Face Landmarker (`@mediapipe/tasks-vision` v0.10.22), ~3MB model, runs on main thread
 - **Background Removal (optional backend):** Python Flask server with Hugging Face `transformers` pipeline on GPU
 - **Image Processing:** Canvas API (browser), Pillow (backend)
-- **Fonts:** Google Fonts (Poppins, weights 300/500)
+- **Fonts:** Google Fonts (Inter, weights 400/500/600)
 
 ## Repository Structure
 
 ```
 ├── index.html              # Single-page static HTML (entry point)
 ├── static/
-│   ├── app.js              # Frontend logic: ES module with cropper, inference, export
-│   ├── worker.js           # Web Worker for background removal inference
-│   └── style.css           # Styling (plain CSS, Poppins font, blue theme)
+│   ├── app.js              # Frontend logic: ES module with cropper, inference, face detection, compliance
+│   ├── worker.js           # Web Worker for background removal inference (BiRefNet Lite)
+│   └── style.css           # Styling (plain CSS, Inter font, blue theme)
 ├── app.py                  # Optional Flask backend for GPU-accelerated inference
 ├── requirements.txt        # Python dependencies (for optional backend only)
+├── RESEARCH-IMAGE-MODELS.md # Research on image editing models and upgrade paths
+├── plan.md                 # Implementation plan for one-click pipeline
 ├── README.md               # Setup, usage, and deployment guide
 ├── LICENSE                 # GPLv3
 └── .gitignore              # Standard Python gitignore
@@ -39,7 +42,8 @@ python3 -m http.server 8000
 # or: npx serve .
 ```
 
-Background removal runs in-browser via Transformers.js/ONNX (~45MB model downloaded on first use).
+Background removal runs in-browser via Transformers.js/ONNX (BiRefNet Lite model downloaded on first use).
+Face detection runs via MediaPipe (~3MB model, lazy-loaded on first use).
 
 ### With optional backend (GPU-accelerated)
 
@@ -71,13 +75,18 @@ npx wrangler pages deploy . --project-name id-photo-editor --branch main --commi
 
 ### Frontend (`static/app.js`)
 
-ES module importing from `@huggingface/transformers` (CDN). Key features:
+ES module with dynamic imports from CDN. Key features:
 
+- **One-click pipeline** — upload photo + select preset → auto face detection → background removal → smart crop → compliance check → export-ready photo
+- **Manual step-by-step wizard** — 5-step flow (Upload → Background → Adjust → Crop → Export) for full control
+- **Face detection** — MediaPipe Face Landmarker (478 landmarks), lazy-loaded via dynamic `import()`, runs on main thread (~50ms per image)
+- **Auto face centering** — computes crop rectangle from face landmarks to center face at ~60% frame height with ~12% top margin
+- **Compliance checking** — per-preset rules validate head height ratio, eye position, horizontal centering, head tilt, face-in-frame, and top margin
 - **Dual inference modes** — browser (Transformers.js/ONNX) or backend (Flask API), selectable via radio buttons
 - **Backend auto-detection** — probes `/remove_background` on load, shows availability status
-- **Model loading with progress** — progress bar during ~45MB ONNX model download
+- **Model loading with progress** — progress bar during ONNX model download
 - **Web Worker inference** — ML model runs in a separate thread to keep UI responsive
-- **Image upload** via FileReader API
+- **Image upload** via FileReader API with drag-and-drop
 - **CropperJS integration** with configurable aspect ratio from width/height inputs
 - **Adaptive zoom** via mouse wheel (scroll speed scales zoom factor, capped at 0.1)
 - **Keyboard navigation** (arrow keys, 10px step) for crop box or image movement
@@ -86,7 +95,15 @@ ES module importing from `@huggingface/transformers` (CDN). Key features:
 - **4x6 Layout** tiles cropped photos onto a 1200x1800px (4x6 inch @ 300 DPI) canvas, downloads as `photo_id_4x6.png`
 - **Error handling** on all async operations with user-visible status messages
 - **Input validation** on width/height before cropper initialization
-- **CONFIG object** centralizes all constants (DPI, canvas size, model ID, zoom factors)
+- **CONFIG object** centralizes all constants (DPI, canvas size, CDN URLs, zoom factors)
+
+### Web Worker (`static/worker.js`)
+
+Runs BiRefNet Lite (`onnx-community/BiRefNet_lite`) for background removal segmentation:
+- Model loaded via `AutoModel.from_pretrained` with `dtype: "fp32"`
+- Processor auto-configured via `AutoProcessor.from_pretrained`
+- Inference: input → pixel_values → model output → sigmoid → scale to [0,255] → resize mask to original dimensions
+- Message protocol: `load-model` / `inference` → `model-ready` / `result` / `error` / `progress`
 
 ### Optional Backend (`app.py`)
 
@@ -104,24 +121,27 @@ CORS enabled for cross-origin frontend hosting.
 
 ### Styling (`static/style.css`)
 
-Plain CSS, no preprocessor. Color scheme: `#4a90e2` (primary blue), `#f4f4f9` (background), `#333` (text). Includes status bar, progress bar, and mode selector styles. Responsive breakpoint at 680px.
+Plain CSS with design tokens (CSS custom properties). Color scheme: `#2563eb` (primary blue), `#fafafa` (background), `#111827` (text). Includes one-click panel, compliance indicators, status toast, progress bar, and settings drawer styles. Responsive breakpoints at 768px and 480px.
 
 ## Development Conventions
 
 ### JavaScript
 - ES module with `import` from CDN — no bundler, no npm
-- DOM element references cached at file top
-- Event listeners attached directly to elements
+- Dynamic `import()` for lazy-loading MediaPipe (only loaded when face detection is needed)
+- DOM element references cached in `dom` object at file top
+- Event listeners attached directly to elements in `attachEventListeners()`
 - CropperJS loaded via CDN `<script>` tag (non-module)
-- Transformers.js loaded via CDN ES module import
+- Transformers.js loaded via CDN ES module import in worker
+- State managed via global `state` object
 
 ### CSS
+- Design tokens in `:root` (colors, spacing, radii, shadows, transitions)
 - Element-level selectors with section comments
-- Responsive media query at 680px breakpoint
+- Responsive media queries at 768px and 480px breakpoints
 
 ### HTML
 - Plain static HTML — no templating engine
-- External resources (CropperJS, Google Fonts, Transformers.js) loaded from CDNs
+- External resources (CropperJS, Google Fonts, Transformers.js, MediaPipe) loaded from CDNs
 
 ### Python (optional backend)
 - Dependencies managed via `requirements.txt`
@@ -137,4 +157,19 @@ Plain CSS, no preprocessor. Color scheme: `#4a90e2` (primary blue), `#f4f4f9` (b
 | Arrow key step | 10px | `static/app.js` CONFIG |
 | Base zoom factor | 0.02 | `static/app.js` CONFIG |
 | Max zoom factor | 0.1 | `static/app.js` CONFIG |
-| ML model | briaai/RMBG-1.4 | `static/app.js` CONFIG / `app.py` env var |
+| BG removal model | onnx-community/BiRefNet_lite | `static/worker.js` |
+| Face detection model | MediaPipe Face Landmarker float16 | `static/app.js` CONFIG |
+| MediaPipe version | @mediapipe/tasks-vision@0.10.22 | `static/app.js` CONFIG |
+
+## Compliance Rules (per preset)
+
+Each preset in `PRESETS` includes a `compliance` object with country-specific rules:
+
+| Rule | Description | Example (US Passport) |
+|------|-------------|----------------------|
+| `headHeightMin/Max` | Head height as fraction of frame height | 50%–69% |
+| `eyeHeightMin/Max` | Eye position from bottom as fraction | 56%–69% |
+| `maxTiltDegrees` | Maximum head roll angle | 5° |
+| Top margin | Space above head (computed, 8%–15%) | 8%–15% |
+| Face in frame | Entire face within crop boundaries | boolean |
+| Horizontal center | Face center deviation from midpoint | < 5% |

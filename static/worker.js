@@ -7,7 +7,7 @@ import {
 
 env.allowLocalModels = false;
 
-const MODEL_ID = "briaai/RMBG-1.4";
+const MODEL_ID = "onnx-community/BiRefNet_lite";
 
 let model = null;
 let processor = null;
@@ -20,7 +20,7 @@ async function loadModel(data) {
 
     try {
         model = await AutoModel.from_pretrained(MODEL_ID, {
-            config: { model_type: "custom" },
+            dtype: "fp32",
             progress_callback: (p) => {
                 if (p.status === "progress" && p.total) {
                     self.postMessage({
@@ -31,19 +31,7 @@ async function loadModel(data) {
             },
         });
 
-        processor = await AutoProcessor.from_pretrained(MODEL_ID, {
-            config: {
-                do_normalize: true,
-                do_pad: false,
-                do_rescale: true,
-                do_resize: true,
-                image_mean: [0.5, 0.5, 0.5],
-                image_std: [1, 1, 1],
-                resample: 2,
-                rescale_factor: 0.00392156862745098,
-                size: { width: 1024, height: 1024 },
-            },
-        });
+        processor = await AutoProcessor.from_pretrained(MODEL_ID);
 
         self.postMessage({ type: "model-ready" });
     } catch (err) {
@@ -62,7 +50,7 @@ async function runInference(data) {
     const { pixel_values } = await processor(rawImage);
     const { output } = await model({ input: pixel_values });
 
-    const maskData = output[0].mul(255).to("uint8");
+    const maskData = output[0].sigmoid().mul(255).to("uint8");
     const mask = await RawImage.fromTensor(maskData).resize(
         rawImage.width,
         rawImage.height,

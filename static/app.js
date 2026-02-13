@@ -9,18 +9,47 @@ const CONFIG = {
     BASE_ZOOM: 0.02,
     MAX_ZOOM: 0.1,
     BACKEND_URL: "/remove_background",
+    MEDIAPIPE_VISION_WASM: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm",
+    MEDIAPIPE_MODEL: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
 };
 
 const PRESETS = [
-    { label: "US Passport", width: 2, height: 2, unit: "inches", region: "North America" },
-    { label: "US Visa", width: 2, height: 2, unit: "inches", region: "North America" },
-    { label: "Canada Passport", width: 5, height: 7, unit: "cm", region: "North America" },
-    { label: "EU/Schengen ID", width: 3.5, height: 4.5, unit: "cm", region: "Europe" },
-    { label: "UK Passport", width: 3.5, height: 4.5, unit: "cm", region: "Europe" },
-    { label: "China Passport", width: 3.3, height: 4.8, unit: "cm", region: "Asia-Pacific" },
-    { label: "India Passport", width: 3.5, height: 3.5, unit: "cm", region: "Asia-Pacific" },
-    { label: "Japan Passport", width: 3.5, height: 4.5, unit: "cm", region: "Asia-Pacific" },
-    { label: "Australia Passport", width: 3.5, height: 4.5, unit: "cm", region: "Asia-Pacific" },
+    {
+        label: "US Passport", width: 2, height: 2, unit: "inches", region: "North America",
+        compliance: { headHeightMin: 0.50, headHeightMax: 0.69, eyeHeightMin: 0.56, eyeHeightMax: 0.69, maxTiltDegrees: 5 },
+    },
+    {
+        label: "US Visa", width: 2, height: 2, unit: "inches", region: "North America",
+        compliance: { headHeightMin: 0.50, headHeightMax: 0.69, eyeHeightMin: 0.56, eyeHeightMax: 0.69, maxTiltDegrees: 5 },
+    },
+    {
+        label: "Canada Passport", width: 5, height: 7, unit: "cm", region: "North America",
+        compliance: { headHeightMin: 0.46, headHeightMax: 0.63, eyeHeightMin: 0.55, eyeHeightMax: 0.65, maxTiltDegrees: 5 },
+    },
+    {
+        label: "EU/Schengen ID", width: 3.5, height: 4.5, unit: "cm", region: "Europe",
+        compliance: { headHeightMin: 0.70, headHeightMax: 0.80, eyeHeightMin: 0.60, eyeHeightMax: 0.70, maxTiltDegrees: 5 },
+    },
+    {
+        label: "UK Passport", width: 3.5, height: 4.5, unit: "cm", region: "Europe",
+        compliance: { headHeightMin: 0.70, headHeightMax: 0.80, eyeHeightMin: 0.60, eyeHeightMax: 0.70, maxTiltDegrees: 5 },
+    },
+    {
+        label: "China Passport", width: 3.3, height: 4.8, unit: "cm", region: "Asia-Pacific",
+        compliance: { headHeightMin: 0.50, headHeightMax: 0.70, eyeHeightMin: 0.55, eyeHeightMax: 0.70, maxTiltDegrees: 5 },
+    },
+    {
+        label: "India Passport", width: 3.5, height: 3.5, unit: "cm", region: "Asia-Pacific",
+        compliance: { headHeightMin: 0.50, headHeightMax: 0.70, eyeHeightMin: 0.55, eyeHeightMax: 0.70, maxTiltDegrees: 5 },
+    },
+    {
+        label: "Japan Passport", width: 3.5, height: 4.5, unit: "cm", region: "Asia-Pacific",
+        compliance: { headHeightMin: 0.70, headHeightMax: 0.80, eyeHeightMin: 0.60, eyeHeightMax: 0.70, maxTiltDegrees: 5 },
+    },
+    {
+        label: "Australia Passport", width: 3.5, height: 4.5, unit: "cm", region: "Asia-Pacific",
+        compliance: { headHeightMin: 0.70, headHeightMax: 0.80, eyeHeightMin: 0.60, eyeHeightMax: 0.70, maxTiltDegrees: 5 },
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -33,6 +62,9 @@ const state = {
     processedDataUrl: null,
     adjustedDataUrl: null,
     adjustments: { brightness: 100, contrast: 100, saturation: 100 },
+    faceData: null,
+    complianceResult: null,
+    isOneClickMode: false,
 };
 
 let cropper = null;
@@ -41,6 +73,7 @@ let worker = null;
 let modelReady = false;
 let wheelHandler = null;
 let lastBlobUrl = null;
+let faceLandmarker = null;
 
 // ---------------------------------------------------------------------------
 // DOM Elements
@@ -67,6 +100,10 @@ const dom = {
     browseButton: $("browse-button"),
     changePhoto: $("change-photo"),
     step1Next: $("step1-next"),
+    oneClickPanel: $("one-click-panel"),
+    quickPresetSelect: $("quick-preset-select"),
+    oneClickButton: $("one-click-button"),
+    manualModeLink: $("manual-mode-link"),
 
     // Step 2
     baBefore: $("ba-before"),
@@ -98,12 +135,16 @@ const dom = {
     cropContainer: $("crop-container"),
     zoomIn: $("zoom-in"),
     zoomOut: $("zoom-out"),
+    autoCenterFace: $("auto-center-face"),
     toggleMode: $("toggle-mode"),
     step4Back: $("step4-back"),
     step4Next: $("step4-next"),
 
     // Step 5
     exportCanvas: $("export-canvas"),
+    compliancePanel: $("compliance-panel"),
+    complianceList: $("compliance-list"),
+    manualAdjustButton: $("manual-adjust-button"),
     cropButton: $("crop-button"),
     generate4x6Button: $("generate-4x6-button"),
     step5Back: $("step5-back"),
@@ -201,6 +242,7 @@ function setupStep1() {
         dom.dropZonePrompt.classList.add("hidden");
         dom.uploadPreview.classList.remove("hidden");
         dom.step1Next.disabled = false;
+        dom.oneClickPanel.classList.remove("hidden");
     }
 }
 
@@ -215,11 +257,15 @@ function handleFile(file) {
         state.processedDataUrl = null;
         state.adjustedDataUrl = null;
         state.adjustments = { brightness: 100, contrast: 100, saturation: 100 };
+        state.faceData = null;
+        state.complianceResult = null;
+        state.isOneClickMode = false;
 
         dom.previewImage.src = state.imageDataUrl;
         dom.dropZonePrompt.classList.add("hidden");
         dom.uploadPreview.classList.remove("hidden");
         dom.step1Next.disabled = false;
+        dom.oneClickPanel.classList.remove("hidden");
     };
     reader.readAsDataURL(file);
 }
@@ -235,6 +281,7 @@ function setupDropZone() {
     zone.addEventListener("click", (e) => {
         if (e.target === dom.imageInput) return;
         if (e.target.closest("#change-photo") || e.target.closest("#browse-button")) return;
+        if (e.target.closest("#one-click-panel")) return;
         openFilePicker();
     });
 
@@ -435,6 +482,9 @@ function setupStep4() {
         wheelHandler = null;
     }
 
+    // Enable auto-center button if face data is available
+    dom.autoCenterFace.disabled = !state.faceData;
+
     // If dimensions are already set, init cropper once image loads
     const w = parseFloat(dom.widthInput.value);
     const h = parseFloat(dom.heightInput.value);
@@ -450,6 +500,34 @@ function setupStep4() {
 function populatePresets() {
     const select = dom.presetSelect;
     // Keep only the first "Custom" option
+    while (select.children.length > 1) {
+        select.removeChild(select.lastChild);
+    }
+
+    const regions = {};
+    PRESETS.forEach((p, i) => {
+        if (!regions[p.region]) regions[p.region] = [];
+        regions[p.region].push({ ...p, index: i });
+    });
+
+    Object.entries(regions).forEach(([region, presets]) => {
+        const group = document.createElement("optgroup");
+        group.label = region;
+        presets.forEach((p) => {
+            const opt = document.createElement("option");
+            const sizeStr = p.unit === "inches"
+                ? `${p.width}\u00d7${p.height}\u2033`
+                : `${Math.round(p.width * 10)}\u00d7${Math.round(p.height * 10)}mm`;
+            opt.value = p.index;
+            opt.textContent = `${p.label} (${sizeStr})`;
+            group.appendChild(opt);
+        });
+        select.appendChild(group);
+    });
+}
+
+function populateQuickPresets() {
+    const select = dom.quickPresetSelect;
     while (select.children.length > 1) {
         select.removeChild(select.lastChild);
     }
@@ -530,6 +608,46 @@ function initializeCropper() {
     dom.image.addEventListener("wheel", wheelHandler);
 }
 
+// Returns a promise that resolves when CropperJS is fully ready
+function initializeCropperAsync() {
+    if (cropper) cropper.destroy();
+    if (wheelHandler) {
+        dom.image.removeEventListener("wheel", wheelHandler);
+        wheelHandler = null;
+    }
+
+    const widthValue = parseFloat(dom.widthInput.value);
+    const heightValue = parseFloat(dom.heightInput.value);
+
+    if (!widthValue || !heightValue || widthValue <= 0 || heightValue <= 0) {
+        return Promise.reject(new Error("Invalid crop dimensions"));
+    }
+
+    return new Promise((resolve) => {
+        cropper = new Cropper(dom.image, {
+            aspectRatio: widthValue / heightValue,
+            dragMode: "crop",
+            ready() {
+                dom.step4Next.disabled = false;
+                dom.zoomIn.disabled = false;
+                dom.zoomOut.disabled = false;
+                dom.toggleMode.disabled = false;
+
+                wheelHandler = (event) => {
+                    event.preventDefault();
+                    const speedFactor = Math.abs(event.deltaY) / 100;
+                    const zoomFactor = Math.min(CONFIG.BASE_ZOOM * speedFactor, CONFIG.MAX_ZOOM);
+                    const delta = event.deltaY > 0 ? -zoomFactor : zoomFactor;
+                    cropper.zoom(delta);
+                };
+                dom.image.addEventListener("wheel", wheelHandler);
+
+                resolve();
+            },
+        });
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Step 5: Export
 // ---------------------------------------------------------------------------
@@ -550,6 +668,348 @@ function setupStep5() {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
     ctx.drawImage(croppedCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
+
+    // Show compliance panel if we have results
+    if (state.complianceResult) {
+        renderCompliancePanel(state.complianceResult);
+    } else {
+        dom.compliancePanel.classList.add("hidden");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Face Detection (MediaPipe)
+// ---------------------------------------------------------------------------
+async function initFaceLandmarker() {
+    if (faceLandmarker) return faceLandmarker;
+
+    const { FaceLandmarker, FilesetResolver } = await import(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs"
+    );
+
+    const vision = await FilesetResolver.forVisionTasks(CONFIG.MEDIAPIPE_VISION_WASM);
+    faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+            modelAssetPath: CONFIG.MEDIAPIPE_MODEL,
+        },
+        runningMode: "IMAGE",
+        numFaces: 1,
+        minFaceDetectionConfidence: 0.5,
+        minFacePresenceConfidence: 0.5,
+    });
+    return faceLandmarker;
+}
+
+async function detectFace(imageElement) {
+    const fl = await initFaceLandmarker();
+    const result = fl.detect(imageElement);
+
+    if (!result.faceLandmarks || result.faceLandmarks.length === 0) {
+        return null;
+    }
+
+    const landmarks = result.faceLandmarks[0];
+
+    // Key landmark indices
+    const foreheadCenter = landmarks[10];
+    const chin = landmarks[152];
+    const leftEyeInner = landmarks[362];
+    const rightEyeInner = landmarks[133];
+    const leftCheek = landmarks[454];
+    const rightCheek = landmarks[234];
+
+    const imgW = imageElement.naturalWidth || imageElement.width;
+    const imgH = imageElement.naturalHeight || imageElement.height;
+
+    // Face center (midpoint between eyes)
+    const eyeCenterX = ((leftEyeInner.x + rightEyeInner.x) / 2) * imgW;
+    const eyeCenterY = ((leftEyeInner.y + rightEyeInner.y) / 2) * imgH;
+
+    // Face bounding box
+    const faceTop = foreheadCenter.y * imgH;
+    const faceBottom = chin.y * imgH;
+    const faceLeft = rightCheek.x * imgW;
+    const faceRight = leftCheek.x * imgW;
+    const faceHeight = faceBottom - faceTop;
+    const faceWidth = faceRight - faceLeft;
+    const faceCenterX = (faceLeft + faceRight) / 2;
+    const faceCenterY = (faceTop + faceBottom) / 2;
+
+    // Head tilt (roll) from eye alignment
+    const rollAngle = Math.atan2(
+        (leftEyeInner.y - rightEyeInner.y) * imgH,
+        (leftEyeInner.x - rightEyeInner.x) * imgW,
+    ) * (180 / Math.PI);
+
+    return {
+        landmarks,
+        eyeCenterX, eyeCenterY,
+        faceCenterX, faceCenterY,
+        faceTop, faceBottom, faceLeft, faceRight,
+        faceHeight, faceWidth,
+        rollAngle,
+        imgW, imgH,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Smart Crop from Face Data
+// ---------------------------------------------------------------------------
+function applyCropFromFaceData(faceData) {
+    if (!cropper || !faceData) return;
+
+    const containerData = cropper.getContainerData();
+    const imageData = cropper.getImageData();
+    const canvasData = cropper.getCanvasData();
+
+    // Get aspect ratio from current crop settings
+    const widthValue = parseFloat(dom.widthInput.value);
+    const heightValue = parseFloat(dom.heightInput.value);
+    if (!widthValue || !heightValue) return;
+    const aspectRatio = widthValue / heightValue;
+
+    // Scale factor from original image coords to CropperJS canvas coords
+    const scaleX = canvasData.width / canvasData.naturalWidth;
+    const scaleY = canvasData.height / canvasData.naturalHeight;
+
+    // Face geometry in CropperJS canvas coordinates
+    const faceCenterXCanvas = faceData.faceCenterX * scaleX + canvasData.left;
+    const faceTopCanvas = faceData.faceTop * scaleY + canvasData.top;
+    const faceHeightCanvas = faceData.faceHeight * scaleY;
+
+    // Target: head occupies ~60% of frame height
+    const targetHeadRatio = 0.60;
+    const cropHeight = faceHeightCanvas / targetHeadRatio;
+    const cropWidth = cropHeight * aspectRatio;
+
+    // Vertical positioning: ~12% margin above head
+    const headMarginTop = 0.12;
+    const cropTop = faceTopCanvas - (cropHeight * headMarginTop);
+    const cropLeft = faceCenterXCanvas - (cropWidth / 2);
+
+    // Clamp to container boundaries
+    const clampedLeft = Math.max(0, Math.min(cropLeft, containerData.width - cropWidth));
+    const clampedTop = Math.max(0, Math.min(cropTop, containerData.height - cropHeight));
+
+    cropper.setCropBoxData({
+        left: clampedLeft,
+        top: clampedTop,
+        width: Math.min(cropWidth, containerData.width),
+        height: Math.min(cropHeight, containerData.height),
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Compliance Checks
+// ---------------------------------------------------------------------------
+function checkCompliance(faceData, presetIndex) {
+    const preset = PRESETS[parseInt(presetIndex)];
+    const rules = preset && preset.compliance;
+    if (!rules || !faceData || !cropper) return { allPassed: true, checks: [] };
+
+    const cropData = cropper.getData();
+    const checks = [];
+
+    // 1. Head-to-frame height ratio
+    const headRatio = faceData.faceHeight / cropData.height;
+    checks.push({
+        id: "head-height",
+        label: `Head height: ${(headRatio * 100).toFixed(0)}% of frame`,
+        expected: `${(rules.headHeightMin * 100).toFixed(0)}%\u2013${(rules.headHeightMax * 100).toFixed(0)}%`,
+        passed: headRatio >= rules.headHeightMin && headRatio <= rules.headHeightMax,
+    });
+
+    // 2. Eye height from bottom
+    if (rules.eyeHeightMin && rules.eyeHeightMax) {
+        const eyeFromBottom = (cropData.y + cropData.height - faceData.eyeCenterY) / cropData.height;
+        checks.push({
+            id: "eye-height",
+            label: `Eye position: ${(eyeFromBottom * 100).toFixed(0)}% from bottom`,
+            expected: `${(rules.eyeHeightMin * 100).toFixed(0)}%\u2013${(rules.eyeHeightMax * 100).toFixed(0)}%`,
+            passed: eyeFromBottom >= rules.eyeHeightMin && eyeFromBottom <= rules.eyeHeightMax,
+        });
+    }
+
+    // 3. Horizontal centering
+    const faceCenterInCrop = (faceData.faceCenterX - cropData.x) / cropData.width;
+    const centerDeviation = Math.abs(faceCenterInCrop - 0.5);
+    checks.push({
+        id: "horizontal-center",
+        label: `Face centering: ${(centerDeviation * 100).toFixed(1)}% off-center`,
+        expected: "< 5%",
+        passed: centerDeviation < 0.05,
+    });
+
+    // 4. Head tilt
+    const absTilt = Math.abs(faceData.rollAngle);
+    checks.push({
+        id: "head-tilt",
+        label: `Head tilt: ${absTilt.toFixed(1)}\u00b0`,
+        expected: `< ${rules.maxTiltDegrees}\u00b0`,
+        passed: absTilt < rules.maxTiltDegrees,
+    });
+
+    // 5. Face fully within frame
+    const faceInFrame =
+        faceData.faceTop >= cropData.y &&
+        faceData.faceBottom <= cropData.y + cropData.height &&
+        faceData.faceLeft >= cropData.x &&
+        faceData.faceRight <= cropData.x + cropData.width;
+    checks.push({
+        id: "face-in-frame",
+        label: faceInFrame ? "Face fully within frame" : "Face partially outside frame",
+        passed: faceInFrame,
+    });
+
+    // 6. Top margin (space above head)
+    const topMargin = (faceData.faceTop - cropData.y) / cropData.height;
+    checks.push({
+        id: "top-margin",
+        label: `Top margin: ${(topMargin * 100).toFixed(0)}%`,
+        expected: "8%\u201315%",
+        passed: topMargin >= 0.08 && topMargin <= 0.15,
+    });
+
+    return {
+        allPassed: checks.every((c) => c.passed),
+        checks,
+    };
+}
+
+function renderCompliancePanel(complianceResult) {
+    const list = dom.complianceList;
+    list.innerHTML = "";
+
+    complianceResult.checks.forEach((check) => {
+        const li = document.createElement("li");
+        li.className = "compliance-item " + (check.passed ? "pass" : "fail");
+
+        const svg = check.passed
+            ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+            : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+        const expectedStr = check.expected ? ` (required: ${check.expected})` : "";
+        li.innerHTML = `${svg}<span>${check.label}${expectedStr}</span>`;
+        list.appendChild(li);
+    });
+
+    dom.compliancePanel.classList.remove("hidden");
+}
+
+// ---------------------------------------------------------------------------
+// One-Click Pipeline
+// ---------------------------------------------------------------------------
+async function oneClickGenerate() {
+    if (!state.imageDataUrl) {
+        showStatus("Please upload a photo first.", "error");
+        return;
+    }
+
+    const presetIndex = dom.quickPresetSelect.value;
+    if (presetIndex === "") {
+        showStatus("Please select an ID photo type.", "error");
+        return;
+    }
+
+    state.isOneClickMode = true;
+    const preset = PRESETS[parseInt(presetIndex)];
+    dom.oneClickButton.disabled = true;
+
+    try {
+        // Step 1: Detect face
+        showStatus("Detecting face...", "info");
+        const tempImg = new Image();
+        await new Promise((resolve, reject) => {
+            tempImg.onload = resolve;
+            tempImg.onerror = reject;
+            tempImg.src = state.imageDataUrl;
+        });
+
+        const faceData = await detectFace(tempImg);
+        if (!faceData) {
+            showStatus("No face detected. Please use manual steps.", "error");
+            state.isOneClickMode = false;
+            dom.oneClickButton.disabled = false;
+            return;
+        }
+        state.faceData = faceData;
+
+        // Step 2: Background removal
+        const mode = getInferenceMode();
+        if (mode === "backend") {
+            const available = await checkBackend();
+            if (!available) {
+                showStatus("Backend not available. Switch to Browser mode in Settings.", "error");
+                state.isOneClickMode = false;
+                dom.oneClickButton.disabled = false;
+                return;
+            }
+            state.processedDataUrl = await removeBackgroundBackend(state.imageFile);
+        } else {
+            state.processedDataUrl = await removeBackgroundBrowser(state.imageDataUrl);
+        }
+
+        // Step 3: Skip adjustments (use defaults for one-click)
+        state.adjustedDataUrl = state.processedDataUrl;
+        state.adjustments = { brightness: 100, contrast: 100, saturation: 100 };
+
+        // Step 4: Set up crop with preset dimensions
+        dom.widthInput.value = preset.width;
+        dom.heightInput.value = preset.height;
+        dom.unitSelect.value = preset.unit === "inches" ? "inches" : "cm";
+        dom.presetSelect.value = presetIndex;
+
+        // Navigate to step 4 to initialize CropperJS with the image
+        const src = state.adjustedDataUrl || state.processedDataUrl || state.imageDataUrl;
+        dom.image.src = src;
+        dom.image.style.display = "block";
+
+        // Destroy existing cropper
+        if (cropper) {
+            cropper.destroy();
+            cropper = null;
+        }
+        if (wheelHandler) {
+            dom.image.removeEventListener("wheel", wheelHandler);
+            wheelHandler = null;
+        }
+
+        // Show step 4 so CropperJS has a visible container
+        goToStep(4);
+
+        // Wait for image to load then initialize cropper
+        await new Promise((resolve) => {
+            if (dom.image.complete && dom.image.naturalWidth) {
+                resolve();
+            } else {
+                dom.image.onload = resolve;
+            }
+        });
+
+        showStatus("Centering face and cropping...", "info");
+        await initializeCropperAsync();
+
+        // Apply smart crop based on face data
+        applyCropFromFaceData(faceData);
+
+        // Step 5: Compliance checks
+        state.complianceResult = checkCompliance(faceData, presetIndex);
+
+        // Navigate to export
+        goToStep(5);
+
+        if (state.complianceResult.allPassed) {
+            showStatus("ID photo generated. All compliance checks passed!", "success");
+        } else {
+            showStatus("ID photo generated. Review compliance warnings below.", "info");
+        }
+        setTimeout(hideStatus, 5000);
+    } catch (err) {
+        showStatus("Generation failed: " + err.message, "error");
+        state.isOneClickMode = false;
+    } finally {
+        dom.oneClickButton.disabled = false;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -719,6 +1179,17 @@ function attachEventListeners() {
     // Step 1
     dom.step1Next.addEventListener("click", () => goToStep(2));
 
+    // One-click panel
+    dom.quickPresetSelect.addEventListener("change", () => {
+        dom.oneClickButton.disabled = dom.quickPresetSelect.value === "";
+    });
+
+    dom.oneClickButton.addEventListener("click", oneClickGenerate);
+
+    dom.manualModeLink.addEventListener("click", () => {
+        dom.step1Next.click();
+    });
+
     // Step 2
     dom.step2Back.addEventListener("click", () => goToStep(1));
 
@@ -806,7 +1277,16 @@ function attachEventListeners() {
         goToStep(3);
     });
 
-    dom.step4Next.addEventListener("click", () => goToStep(5));
+    dom.step4Next.addEventListener("click", () => {
+        // Run compliance check before going to export if we have face data
+        if (state.faceData) {
+            const presetIndex = dom.presetSelect.value;
+            if (presetIndex !== "") {
+                state.complianceResult = checkCompliance(state.faceData, presetIndex);
+            }
+        }
+        goToStep(5);
+    });
 
     dom.presetSelect.addEventListener("change", () => {
         applyPreset(dom.presetSelect.value);
@@ -832,6 +1312,41 @@ function attachEventListeners() {
         if (cropper) cropper.zoom(-0.1);
     });
 
+    // Auto-center face button
+    dom.autoCenterFace.addEventListener("click", async () => {
+        if (!cropper) return;
+
+        // If no face data yet, detect now
+        if (!state.faceData) {
+            dom.autoCenterFace.disabled = true;
+            showStatus("Detecting face...", "info");
+            try {
+                const tempImg = new Image();
+                await new Promise((resolve, reject) => {
+                    tempImg.onload = resolve;
+                    tempImg.onerror = reject;
+                    tempImg.src = state.adjustedDataUrl || state.processedDataUrl || state.imageDataUrl;
+                });
+                const faceData = await detectFace(tempImg);
+                if (!faceData) {
+                    showStatus("No face detected in the image.", "error");
+                    setTimeout(hideStatus, 3000);
+                    dom.autoCenterFace.disabled = false;
+                    return;
+                }
+                state.faceData = faceData;
+            } catch (err) {
+                showStatus("Face detection failed: " + err.message, "error");
+                dom.autoCenterFace.disabled = false;
+                return;
+            }
+        }
+
+        applyCropFromFaceData(state.faceData);
+        hideStatus();
+        dom.autoCenterFace.disabled = false;
+    });
+
     dom.toggleMode.addEventListener("click", () => {
         isMovingCropWindow = !isMovingCropWindow;
         dom.toggleMode.textContent = isMovingCropWindow ? "Move Image" : "Move Crop";
@@ -840,12 +1355,17 @@ function attachEventListeners() {
     // Step 5
     dom.step5Back.addEventListener("click", () => goToStep(4));
 
+    dom.manualAdjustButton.addEventListener("click", () => goToStep(3));
+
     dom.step5StartOver.addEventListener("click", () => {
         state.imageFile = null;
         state.imageDataUrl = null;
         state.processedDataUrl = null;
         state.adjustedDataUrl = null;
         state.adjustments = { brightness: 100, contrast: 100, saturation: 100 };
+        state.faceData = null;
+        state.complianceResult = null;
+        state.isOneClickMode = false;
         if (cropper) { cropper.destroy(); cropper = null; }
         if (wheelHandler) {
             dom.image.removeEventListener("wheel", wheelHandler);
@@ -854,8 +1374,12 @@ function attachEventListeners() {
 
         dom.dropZonePrompt.classList.remove("hidden");
         dom.uploadPreview.classList.add("hidden");
+        dom.oneClickPanel.classList.add("hidden");
+        dom.compliancePanel.classList.add("hidden");
         dom.step1Next.disabled = true;
         dom.imageInput.value = "";
+        dom.quickPresetSelect.value = "";
+        dom.oneClickButton.disabled = true;
 
         goToStep(1);
     });
@@ -978,6 +1502,7 @@ dom.getStarted.addEventListener("click", () => {
 });
 
 setupDropZone();
+populateQuickPresets();
 attachEventListeners();
 updateProgressIndicator();
 checkBackend();
