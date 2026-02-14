@@ -58,15 +58,30 @@ async function runInference(data) {
         await loadModel();
     }
 
-    const rawImage = await RawImage.fromURL(data.imageDataUrl);
+    let rawImage;
+    if (data.imageData) {
+        // Mobile path: raw pixels transferred from main thread (zero-copy)
+        const pixels = new Uint8ClampedArray(data.imageData);
+        rawImage = new RawImage(pixels, data.width, data.height, 4);
+        console.log(`[worker] mobile path: ${data.width}x${data.height} (${(pixels.byteLength / 1024 / 1024).toFixed(1)}MB)`);
+    } else {
+        // Desktop path: decode data URL
+        rawImage = await RawImage.fromURL(data.imageDataUrl);
+        console.log(`[worker] desktop path: ${rawImage.width}x${rawImage.height}`);
+    }
+
+    console.log("[worker] running processor...");
     const { pixel_values } = await processor(rawImage);
+    console.log("[worker] running model inference...");
     const { output } = await model({ input: pixel_values });
 
+    console.log("[worker] resizing mask...");
     const maskData = output[0].mul(255).to("uint8");
     const mask = await RawImage.fromTensor(maskData).resize(
         rawImage.width,
         rawImage.height,
     );
+    console.log("[worker] inference complete");
 
     self.postMessage({
         type: "result",

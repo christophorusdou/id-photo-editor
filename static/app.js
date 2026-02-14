@@ -12,6 +12,7 @@ const CONFIG = {
     MEDIAPIPE_VISION_WASM: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm",
     MEDIAPIPE_MODEL: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
     MAX_IMAGE_DIM: 2048,
+    MAX_IMAGE_DIM_MOBILE: 1200,
 };
 
 const PRESETS = [
@@ -76,6 +77,20 @@ let modelReady = false;
 let wheelHandler = null;
 let lastBlobUrl = null;
 let faceLandmarker = null;
+
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
+
+function logMem(label) {
+    if (!isMobile) return;
+    const mb = (bytes) => (bytes / 1024 / 1024).toFixed(1) + "MB";
+    // performance.memory is Chrome-only; on Safari just log the label
+    if (performance.memory) {
+        console.log(`[mem] ${label}: used=${mb(performance.memory.usedJSHeapSize)} total=${mb(performance.memory.totalJSHeapSize)}`);
+    } else {
+        console.log(`[mem] ${label}`);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Image Resize Helper (prevents mobile OOM crashes with 12MP+ photos)
@@ -278,7 +293,10 @@ function handleFile(file) {
     state.imageFile = file;
     const reader = new FileReader();
     reader.onload = async () => {
-        state.imageDataUrl = await resizeImageIfNeeded(reader.result, CONFIG.MAX_IMAGE_DIM);
+        const maxDim = isMobile ? CONFIG.MAX_IMAGE_DIM_MOBILE : CONFIG.MAX_IMAGE_DIM;
+        logMem(`handleFile start (maxDim=${maxDim}, rawLen=${(reader.result.length / 1024 / 1024).toFixed(1)}MB)`);
+        state.imageDataUrl = await resizeImageIfNeeded(reader.result, maxDim);
+        logMem("handleFile resized");
         // Reset downstream state
         state.processedDataUrl = null;
         state.adjustedDataUrl = null;
@@ -1057,12 +1075,12 @@ async function checkBackend() {
 // ---------------------------------------------------------------------------
 function getWorker() {
     if (!worker) {
-        worker = new Worker("static/worker.js?v=2", { type: "module" });
+        worker = new Worker("static/worker.js?v=3", { type: "module" });
     }
     return worker;
 }
 
-function sendWorkerMessage(msg) {
+function sendWorkerMessage(msg, transferables) {
     return new Promise((resolve, reject) => {
         const w = getWorker();
 
@@ -1089,7 +1107,7 @@ function sendWorkerMessage(msg) {
 
         w.addEventListener("message", onMessage);
         w.addEventListener("error", onError);
-        w.postMessage(msg);
+        w.postMessage(msg, transferables || []);
     });
 }
 
@@ -1129,11 +1147,43 @@ async function removeBackgroundBrowser(imageDataUrl) {
     }
 
     showStatus("Removing background...", "info");
+    logMem("removeBackground start");
 
-    const result = await sendWorkerMessage({
-        type: "inference",
-        imageDataUrl,
-    });
+    let result;
+    if (isMobile) {
+        // Mobile path: extract raw pixels and transfer to worker (avoids double-decode)
+        const img = new Image();
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+            img.src = imageDataUrl;
+        });
+        logMem(`removeBackground decoded (${img.width}x${img.height}, ~${(img.width * img.height * 4 / 1024 / 1024).toFixed(1)}MB RGBA)`);
+        const offscreen = document.createElement("canvas");
+        offscreen.width = img.width;
+        offscreen.height = img.height;
+        const offCtx = offscreen.getContext("2d");
+        offCtx.drawImage(img, 0, 0);
+        const pixelData = offCtx.getImageData(0, 0, img.width, img.height);
+        // Free the offscreen canvas
+        offscreen.width = 0;
+        offscreen.height = 0;
+        logMem("removeBackground pixels extracted, canvas freed");
+
+        result = await sendWorkerMessage({
+            type: "inference",
+            imageData: pixelData.data.buffer,
+            width: img.width,
+            height: img.height,
+        }, [pixelData.data.buffer]);
+        logMem("removeBackground inference done (buffer transferred)");
+    } else {
+        // Desktop path: send data URL string
+        result = await sendWorkerMessage({
+            type: "inference",
+            imageDataUrl,
+        });
+    }
 
     const { maskData, width, height } = result;
     const canvas = document.createElement("canvas");
@@ -1155,8 +1205,11 @@ async function removeBackgroundBrowser(imageDataUrl) {
         imageData.data[i * 4 + 3] = maskData[i];
     }
     ctx.putImageData(imageData, 0, 0);
+    logMem("removeBackground mask applied");
 
-    return canvas.toDataURL("image/png");
+    const resultDataUrl = canvas.toDataURL("image/png");
+    logMem("removeBackground done");
+    return resultDataUrl;
 }
 
 // ---------------------------------------------------------------------------
