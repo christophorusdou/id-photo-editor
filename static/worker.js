@@ -88,13 +88,16 @@ async function runInference(data) {
     const { pixel_values } = await processor(rawImage);
     console.log("[worker] running model inference...");
     const { output } = await model({ input: pixel_values });
+    pixel_values.dispose?.();  // Free processor output (~3MB)
 
     console.log("[worker] resizing mask...");
     const maskData = output[0].mul(255).to("uint8");
+    output.dispose?.();  // Free model output (~1MB)
     const mask = await RawImage.fromTensor(maskData).resize(
         rawImage.width,
         rawImage.height,
     );
+    maskData.dispose?.();  // Free intermediate mask tensor
     console.log("[worker] inference complete");
 
     self.postMessage({
