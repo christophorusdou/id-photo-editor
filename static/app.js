@@ -109,6 +109,7 @@ function getMemoryTier() {
 }
 
 const memoryTier = getMemoryTier();
+const isLowMemDevice = memoryTier === MEMORY_TIERS.low;
 console.log(`[tier] ${memoryTier.label}: processor=${memoryTier.processorSize}px, maxImage=${memoryTier.maxImageDim}px`);
 
 function logMem(label) {
@@ -127,7 +128,7 @@ function logMem(label) {
 // ---------------------------------------------------------------------------
 
 // Convert a canvas to a blob URL (avoids data URL base64 overhead — saves ~33%)
-function canvasToBlobUrl(canvas, type = "image/jpeg", quality = 0.90) {
+function canvasToBlobUrl(canvas, type = "image/jpeg", quality = 0.92) {
     return new Promise((resolve) => {
         canvas.toBlob((blob) => {
             // Zero the canvas immediately to free its backing store
@@ -150,12 +151,17 @@ function resizeImageIfNeeded(dataUrl, maxDim) {
         const img = new Image();
         img.onload = () => {
             if (img.width <= maxDim && img.height <= maxDim) {
-                // Still convert to blob URL to avoid keeping the large data URL
-                const canvas = document.createElement("canvas");
-                canvas.width = img.width;
-                canvas.height = img.height;
-                canvas.getContext("2d").drawImage(img, 0, 0);
-                canvasToBlobUrl(canvas).then(resolve);
+                if (isLowMemDevice) {
+                    // Low-mem: convert to blob URL to avoid keeping the large data URL
+                    const canvas = document.createElement("canvas");
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    canvas.getContext("2d").drawImage(img, 0, 0);
+                    canvasToBlobUrl(canvas).then(resolve);
+                } else {
+                    // Desktop/iPad/Android: return data URL as-is (no extra canvas round-trip)
+                    resolve(dataUrl);
+                }
                 return;
             }
             const scale = maxDim / Math.max(img.width, img.height);
@@ -165,7 +171,12 @@ function resizeImageIfNeeded(dataUrl, maxDim) {
             canvas.width = w;
             canvas.height = h;
             canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-            canvasToBlobUrl(canvas).then(resolve);
+            if (isLowMemDevice) {
+                // Low-mem: use blob URL to save ~33% base64 overhead
+                canvasToBlobUrl(canvas).then(resolve);
+            } else {
+                resolve(canvas.toDataURL("image/jpeg", 0.92));
+            }
         };
         img.src = dataUrl;
     });
@@ -299,8 +310,8 @@ function goToStep(n) {
     const target = document.querySelector(`.wizard-step[data-step="${n}"]`);
     if (target) target.classList.add("active");
 
-    // On mobile, clear DOM image sources from steps we're leaving to free decoded bitmaps
-    if (isMobile) {
+    // Low-mem: clear DOM image sources from steps we're leaving to free decoded bitmaps
+    if (isLowMemDevice) {
         if (prevStep === 1 && n !== 1) {
             dom.previewImage.src = "";
         }
@@ -566,9 +577,13 @@ function bakeAdjustments() {
                 applyAdjustmentsPixel(ctx, canvas.width, canvas.height);
             }
 
-            // Use blob URL instead of data URL to save ~33% memory
-            revokeBlobUrl(state.adjustedDataUrl);
-            state.adjustedDataUrl = await canvasToBlobUrl(canvas, "image/png");
+            if (isLowMemDevice) {
+                // Low-mem: use blob URL to save ~33% memory
+                revokeBlobUrl(state.adjustedDataUrl);
+                state.adjustedDataUrl = await canvasToBlobUrl(canvas, "image/png");
+            } else {
+                state.adjustedDataUrl = canvas.toDataURL("image/png");
+            }
             resolve();
         };
         img.onerror = resolve;
@@ -764,9 +779,11 @@ function setupStep5() {
     ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
     ctx.drawImage(croppedCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
 
-    // Free the full-resolution cropped canvas (only the small preview is needed)
-    croppedCanvas.width = 0;
-    croppedCanvas.height = 0;
+    // Low-mem: free the full-resolution cropped canvas (only the small preview is needed)
+    if (isLowMemDevice) {
+        croppedCanvas.width = 0;
+        croppedCanvas.height = 0;
+    }
 
     // Show compliance panel if we have results
     if (state.complianceResult) {
@@ -1050,7 +1067,9 @@ async function oneClickGenerate() {
             faceLandmarker.close();
             faceLandmarker = null;
             logMem("MediaPipe closed");
-            // Yield to let GC collect MediaPipe memory before heavy BG removal
+        }
+        // Low-mem: yield to let GC collect MediaPipe memory before heavy BG removal
+        if (isLowMemDevice) {
             await new Promise(r => setTimeout(r, 100));
         }
 
@@ -1078,8 +1097,8 @@ async function oneClickGenerate() {
         state.adjustedDataUrl = state.processedDataUrl;
         state.adjustments = { brightness: 100, contrast: 100, saturation: 100 };
 
-        // Free original image on mobile (processedDataUrl is all we need from here)
-        if (isMobile && state.imageDataUrl && state.imageDataUrl !== state.processedDataUrl) {
+        // Low-mem: free original image (processedDataUrl is all we need from here)
+        if (isLowMemDevice && state.imageDataUrl && state.imageDataUrl !== state.processedDataUrl) {
             revokeBlobUrl(state.imageDataUrl);
             state.imageDataUrl = null;
             logMem("imageDataUrl freed (one-click: no longer needed)");
@@ -1452,15 +1471,17 @@ async function attemptInference(imageDataUrl, processorSize, useMainThread = fal
     logMem("removeBackground mask applied");
 
     const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
-    // Free the mask-application canvas (~4.8MB for a 1012x1200 image)
-    canvas.width = 0;
-    canvas.height = 0;
+    if (isLowMemDevice) {
+        // Free the mask-application canvas (~4.8MB for a 1012x1200 image)
+        canvas.width = 0;
+        canvas.height = 0;
+    }
     revokeBlobUrl(lastBlobUrl);
     lastBlobUrl = URL.createObjectURL(blob);
     logMem("removeBackground done (blob URL)");
 
-    // On mobile, null out sourceImg and yield to GC before returning
-    if (isMobile) {
+    // Low-mem: null out sourceImg and yield to GC before returning
+    if (isLowMemDevice) {
         sourceImg = null;
         await new Promise(r => setTimeout(r, 50));
     }
@@ -1770,21 +1791,21 @@ function attachEventListeners() {
         ectx.fillRect(0, 0, width, height);
         ectx.drawImage(croppedCanvas, 0, 0);
 
-        // Use JPEG on mobile (much smaller), PNG on desktop for lossless
-        const fmt = isMobile ? "image/jpeg" : "image/png";
-        const ext = isMobile ? "jpg" : "png";
+        // Use JPEG on low-mem devices (much smaller), PNG elsewhere for lossless
+        const fmt = isLowMemDevice ? "image/jpeg" : "image/png";
+        const ext = isLowMemDevice ? "jpg" : "png";
         exportCanvas.toBlob((blob) => {
-            // Free canvas backing store immediately
-            exportCanvas.width = 0;
-            exportCanvas.height = 0;
+            if (isLowMemDevice) {
+                exportCanvas.width = 0;
+                exportCanvas.height = 0;
+            }
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
             link.href = url;
             link.download = `photo_id.${ext}`;
             link.click();
-            // Revoke after a short delay to ensure download starts
             setTimeout(() => URL.revokeObjectURL(url), 5000);
-        }, fmt, isMobile ? 0.92 : undefined);
+        }, fmt, isLowMemDevice ? 0.92 : undefined);
     });
 
     // Generate 4x6 Layout
@@ -1816,20 +1837,21 @@ function attachEventListeners() {
             }
         }
 
-        // Use JPEG on mobile (much smaller than PNG for photo content)
-        const fmt = isMobile ? "image/jpeg" : "image/png";
-        const ext = isMobile ? "jpg" : "png";
+        // Use JPEG on low-mem devices (much smaller than PNG for photo content)
+        const fmt = isLowMemDevice ? "image/jpeg" : "image/png";
+        const ext = isLowMemDevice ? "jpg" : "png";
         canvas.toBlob((blob) => {
-            // Free the large 4x6 canvas backing store immediately (~8.6MB)
-            canvas.width = 0;
-            canvas.height = 0;
+            if (isLowMemDevice) {
+                canvas.width = 0;
+                canvas.height = 0;
+            }
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
             link.href = url;
             link.download = `photo_id_4x6.${ext}`;
             link.click();
             setTimeout(() => URL.revokeObjectURL(url), 5000);
-        }, fmt, isMobile ? 0.92 : undefined);
+        }, fmt, isLowMemDevice ? 0.92 : undefined);
     });
 
     // Keyboard navigation (only active on crop step)
