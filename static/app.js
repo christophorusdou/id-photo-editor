@@ -84,7 +84,7 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 const MEMORY_TIERS = {
     high:   { processorSize: 1024, maxImageDim: 2048, label: "high" },
     medium: { processorSize: 768,  maxImageDim: 1200, label: "medium" },
-    low:    { processorSize: 512,  maxImageDim: 1200, label: "low" },
+    low:    { processorSize: 256,  maxImageDim: 1200, label: "low" },
 };
 
 function getMemoryTier() {
@@ -1208,9 +1208,13 @@ async function runInferenceMainThread(imageDataUrl, processorSize) {
 
     console.log("[main-thread] running model inference...");
     const { output } = await mainThreadModel({ input: pixel_values });
+    pixel_values.dispose?.();  // Free ~3MB
+    logMem("[main-thread] pixel_values disposed");
 
     console.log("[main-thread] resizing mask...");
     const maskData = output[0].mul(255).to("uint8");
+    output.dispose?.();  // Free ~1MB
+    logMem("[main-thread] output disposed");
     const mask = await RawImage.fromTensor(maskData).resize(
         rawImage.width,
         rawImage.height,
@@ -1226,6 +1230,9 @@ async function runInferenceMainThread(imageDataUrl, processorSize) {
     mainThreadProcessor = null;
     mainThreadModelReady = false;
     logMem("[main-thread] model freed");
+
+    // Yield to event loop so GC can collect before mask application
+    await new Promise(r => setTimeout(r, 50));
 
     return resultData;
 }
@@ -1386,9 +1393,14 @@ async function attemptInference(imageDataUrl, processorSize, useMainThread = fal
     ctx.putImageData(imageData, 0, 0);
     logMem("removeBackground mask applied");
 
-    const resultDataUrl = canvas.toDataURL("image/png");
-    logMem("removeBackground done");
-    return resultDataUrl;
+    const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+    // Free the mask-application canvas (~4.8MB for a 1012x1200 image)
+    canvas.width = 0;
+    canvas.height = 0;
+    if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
+    lastBlobUrl = URL.createObjectURL(blob);
+    logMem("removeBackground done (blob URL)");
+    return lastBlobUrl;
 }
 
 async function removeBackgroundBrowser(imageDataUrl) {
