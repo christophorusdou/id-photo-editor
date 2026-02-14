@@ -1,13 +1,17 @@
 # Photo ID Generator
 
-A web application for uploading photos, cropping them to ID/passport dimensions, removing backgrounds with AI, and exporting print-ready layouts. Runs entirely in the browser — no server required.
+A free, private web app for generating passport and ID photos. One-click pipeline with face detection, AI background removal, smart cropping, and compliance checking — runs entirely in your browser with no server required.
 
 ## Features
 
-- Upload and crop photos to any ID/passport dimension (inches or cm)
-- AI background removal powered by [briaai/RMBG-1.4](https://huggingface.co/briaai/RMBG-1.4), running directly in your browser
-- Generate print-ready 4x6 inch layouts tiled with cropped photos
-- Adaptive zoom, keyboard navigation, and drag controls
+- **One-click ID photo generation** — upload a photo, select a preset, get a compliant ID photo instantly
+- **9 country/region presets** — US Passport, US Visa, Canada, EU/Schengen, UK, China, India, Japan, Australia — each with compliance validation
+- **AI background removal** powered by [briaai/RMBG-1.4](https://huggingface.co/briaai/RMBG-1.4) via Transformers.js, running directly in your browser
+- **Face detection & smart cropping** — MediaPipe face landmarks auto-center your face with correct head size and margins
+- **Compliance checking** — validates head height, eye position, centering, tilt, and margins against official requirements
+- **Print-ready exports** — download a single cropped photo or a 4x6 sheet with multiple tiled copies at 300 DPI
+- **100% client-side** — no server required, your photos never leave your device
+- **Manual mode** — full step-by-step wizard (Upload → Background → Adjust → Crop → Export) for fine-grained control
 - Optional GPU-accelerated backend for faster inference
 
 ## Quick Start

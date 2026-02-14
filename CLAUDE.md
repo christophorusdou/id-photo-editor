@@ -8,8 +8,8 @@ Photo ID Generator — a static web application for uploading photos, cropping t
 
 - **Frontend:** Vanilla JavaScript (ES modules), HTML, CSS — no framework, no build step
 - **Image Cropping:** CropperJS v1.5.12 (loaded from CDN)
-- **Background Removal (browser):** Transformers.js (`@huggingface/transformers` v3) with `onnx-community/BiRefNet_lite` ONNX model (Apache 2.0), runs via WebAssembly in-browser
-- **Face Detection:** MediaPipe Face Landmarker (`@mediapipe/tasks-vision` v0.10.22), ~3MB model, runs on main thread
+- **Background Removal (browser):** Transformers.js (`@huggingface/transformers` v3) with `briaai/RMBG-1.4` ONNX model, runs via WebAssembly in-browser
+- **Face Detection:** MediaPipe Face Landmarker (`@mediapipe/tasks-vision` v0.10.32), ~3MB model, runs on main thread
 - **Background Removal (optional backend):** Python Flask server with Hugging Face `transformers` pipeline on GPU
 - **Image Processing:** Canvas API (browser), Pillow (backend)
 - **Fonts:** Google Fonts (Inter, weights 400/500/600)
@@ -20,7 +20,7 @@ Photo ID Generator — a static web application for uploading photos, cropping t
 ├── index.html              # Single-page static HTML (entry point)
 ├── static/
 │   ├── app.js              # Frontend logic: ES module with cropper, inference, face detection, compliance
-│   ├── worker.js           # Web Worker for background removal inference (BiRefNet Lite)
+│   ├── worker.js           # Web Worker for background removal inference (RMBG-1.4)
 │   └── style.css           # Styling (plain CSS, Inter font, blue theme)
 ├── app.py                  # Optional Flask backend for GPU-accelerated inference
 ├── requirements.txt        # Python dependencies (for optional backend only)
@@ -42,7 +42,7 @@ python3 -m http.server 8000
 # or: npx serve .
 ```
 
-Background removal runs in-browser via Transformers.js/ONNX (BiRefNet Lite model downloaded on first use).
+Background removal runs in-browser via Transformers.js/ONNX (RMBG-1.4 model, ~45MB, downloaded on first use).
 Face detection runs via MediaPipe (~3MB model, lazy-loaded on first use).
 
 ### With optional backend (GPU-accelerated)
@@ -99,10 +99,10 @@ ES module with dynamic imports from CDN. Key features:
 
 ### Web Worker (`static/worker.js`)
 
-Runs BiRefNet Lite (`onnx-community/BiRefNet_lite`) for background removal segmentation:
+Runs RMBG-1.4 (`briaai/RMBG-1.4`) for background removal segmentation:
 - Model loaded via `AutoModel.from_pretrained` with `dtype: "fp32"`
 - Processor auto-configured via `AutoProcessor.from_pretrained`
-- Inference: input → pixel_values → model output → sigmoid → scale to [0,255] → resize mask to original dimensions
+- Inference: input → pixel_values → model output → `.mul(255)` → resize mask to original dimensions
 - Message protocol: `load-model` / `inference` → `model-ready` / `result` / `error` / `progress`
 
 ### Optional Backend (`app.py`)
@@ -157,9 +157,9 @@ Plain CSS with design tokens (CSS custom properties). Color scheme: `#2563eb` (p
 | Arrow key step | 10px | `static/app.js` CONFIG |
 | Base zoom factor | 0.02 | `static/app.js` CONFIG |
 | Max zoom factor | 0.1 | `static/app.js` CONFIG |
-| BG removal model | onnx-community/BiRefNet_lite | `static/worker.js` |
+| BG removal model | briaai/RMBG-1.4 | `static/worker.js` |
 | Face detection model | MediaPipe Face Landmarker float16 | `static/app.js` CONFIG |
-| MediaPipe version | @mediapipe/tasks-vision@0.10.22 | `static/app.js` CONFIG |
+| MediaPipe version | @mediapipe/tasks-vision@0.10.32 | `static/app.js` CONFIG |
 
 ## Compliance Rules (per preset)
 

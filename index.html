@@ -4,14 +4,14 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Photo ID Generator — Free Passport & ID Photos in Seconds</title>
-        <meta name="description" content="Create passport and ID photos instantly. AI-powered background removal, smart cropping, and print-ready 4x6 layouts — 100% free, private, and runs entirely in your browser." />
+        <meta name="description" content="One-click passport and ID photo generator with face detection, AI background removal, and compliance checking for 9 countries. Print-ready layouts — 100% free and private in your browser." />
         <link rel="canonical" href="https://id-photo-editor.cdrift.com/" />
         <meta name="robots" content="index, follow" />
 
         <!-- Open Graph -->
         <meta property="og:type" content="website" />
         <meta property="og:title" content="Photo ID Generator — Free Passport & ID Photos" />
-        <meta property="og:description" content="Create passport and ID photos instantly. AI background removal, smart cropping, and print-ready exports — 100% free and private." />
+        <meta property="og:description" content="One-click ID photo generator with face detection, AI background removal, and compliance checking for 9 countries. Free and private." />
         <meta property="og:url" content="https://id-photo-editor.cdrift.com/" />
         <meta property="og:site_name" content="Photo ID Generator" />
         <meta property="og:image" content="https://id-photo-editor.cdrift.com/og-image.png" />
@@ -21,7 +21,7 @@
         <!-- Twitter Card -->
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content="Photo ID Generator — Free Passport & ID Photos" />
-        <meta name="twitter:description" content="Create passport and ID photos instantly. AI background removal, smart cropping, and print-ready exports — 100% free and private." />
+        <meta name="twitter:description" content="One-click ID photo generator with face detection, AI background removal, and compliance checking for 9 countries. Free and private." />
         <meta name="twitter:image" content="https://id-photo-editor.cdrift.com/og-image.png" />
 
         <!-- Theme & Icons -->
@@ -40,7 +40,7 @@
             "@type": "WebApplication",
             "name": "Photo ID Generator",
             "url": "https://id-photo-editor.cdrift.com/",
-            "description": "Create passport and ID photos in seconds. AI-powered background removal, smart cropping, and print-ready 4x6 layouts — runs entirely in your browser.",
+            "description": "One-click passport and ID photo generator with face detection, AI background removal, compliance checking for 9 countries, and print-ready layouts — runs entirely in your browser.",
             "applicationCategory": "PhotographyApplication",
             "operatingSystem": "Any (browser-based)",
             "offers": {
@@ -50,7 +50,7 @@
             },
             "featureList": [
                 "One-click ID photo generation",
-                "AI background removal (BiRefNet)",
+                "AI background removal (RMBG-1.4)",
                 "Auto face detection and centering",
                 "ID photo compliance checking",
                 "Smart cropping with presets",
@@ -78,7 +78,7 @@
                 <div class="landing-hero">
                     <div class="landing-badge">100% Free &amp; Private</div>
                     <h1 class="landing-title">Photo ID Generator</h1>
-                    <p class="landing-tagline">Create passport and ID photos in seconds. AI background removal, smart cropping, and print-ready exports &mdash; all running in your browser.</p>
+                    <p class="landing-tagline">One-click passport and ID photos with face detection, background removal, and compliance checking for 9 countries &mdash; plus print-ready 4&times;6 layouts. All in your browser.</p>
                     <button class="btn-primary landing-cta" id="get-started" type="button">
                         Get Started
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
@@ -88,24 +88,31 @@
                 <div class="landing-features">
                     <div class="feature-card">
                         <div class="feature-icon">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        </div>
+                        <h3>One-Click Generation</h3>
+                        <p>Upload a photo, select a preset, and get a compliant ID photo instantly. Face detection, background removal, smart cropping, and compliance checking &mdash; all automatic.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="9" height="9" rx="1"/><rect x="13" y="2" width="9" height="9" rx="1"/><rect x="2" y="13" width="9" height="9" rx="1"/><rect x="13" y="13" width="9" height="9" rx="1"/></svg>
+                        </div>
+                        <h3>Print-Ready Layouts</h3>
+                        <p>Download a single photo or a 4&times;6 sheet with multiple copies, ready to print at home or at any photo printer.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                        </div>
+                        <h3>9 Country Presets</h3>
+                        <p>US Passport, US Visa, Canada, EU/Schengen, UK, China, India, Japan, and Australia &mdash; with compliance validation for each.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
                             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                         </div>
-                        <h3>Your Photos Stay Private</h3>
-                        <p>Everything runs locally in your browser. Your images are never uploaded to any server &mdash; they never leave your device.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feature-icon">
-                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
-                        </div>
-                        <h3>AI-Powered</h3>
-                        <p>State-of-the-art background removal powered by machine learning, running entirely via WebAssembly in your browser.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feature-icon">
-                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                        </div>
-                        <h3>Completely Free</h3>
-                        <p>No sign-ups, no watermarks, no limits. Use it as many times as you need, forever.</p>
+                        <h3>100% Private &amp; Free</h3>
+                        <p>Everything runs in your browser. No uploads, no sign-ups, no watermarks, no limits.</p>
                     </div>
                 </div>
 
