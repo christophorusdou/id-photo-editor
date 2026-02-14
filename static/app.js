@@ -146,6 +146,13 @@ function revokeBlobUrl(url) {
     }
 }
 
+// Convert a data URL to a blob URL without re-encoding (preserves original quality)
+function dataUrlToBlobUrl(dataUrl) {
+    return fetch(dataUrl)
+        .then(r => r.blob())
+        .then(blob => URL.createObjectURL(blob));
+}
+
 function resizeImageIfNeeded(dataUrl, maxDim) {
     return new Promise((resolve) => {
         const img = new Image();
@@ -153,13 +160,10 @@ function resizeImageIfNeeded(dataUrl, maxDim) {
             if (img.width <= maxDim && img.height <= maxDim) {
                 if (isLowMemDevice) {
                     // Low-mem: convert to blob URL to avoid keeping the large data URL
-                    const canvas = document.createElement("canvas");
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    canvas.getContext("2d").drawImage(img, 0, 0);
-                    canvasToBlobUrl(canvas).then(resolve);
+                    // Uses fetch to decode data URL → blob directly (no re-encoding, no quality loss)
+                    dataUrlToBlobUrl(dataUrl).then(resolve);
                 } else {
-                    // Desktop/iPad/Android: return data URL as-is (no extra canvas round-trip)
+                    // Desktop/iPad/Android: return data URL as-is
                     resolve(dataUrl);
                 }
                 return;
