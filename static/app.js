@@ -789,13 +789,13 @@ function applyCropFromFaceData(faceData) {
     const headTopCanvas = faceData.headTop * scaleY + canvasData.top;
     const headHeightCanvas = faceData.headHeight * scaleY;
 
-    // Target: head (including top of skull) occupies ~60% of frame height
-    const targetHeadRatio = 0.60;
+    // Target: head (including top of skull) occupies ~55% of frame height
+    const targetHeadRatio = 0.55;
     const cropHeight = headHeightCanvas / targetHeadRatio;
     const cropWidth = cropHeight * aspectRatio;
 
-    // Vertical positioning: ~12% margin above top of head
-    const headMarginTop = 0.12;
+    // Vertical positioning: ~18% margin above top of head
+    const headMarginTop = 0.18;
     const cropTop = headTopCanvas - (cropHeight * headMarginTop);
     const cropLeft = faceCenterXCanvas - (cropWidth / 2);
 
