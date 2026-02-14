@@ -1217,7 +1217,17 @@ async function runInferenceMainThread(imageDataUrl, processorSize) {
     );
 
     logMem("[main-thread] inference done");
-    return { maskData: mask.data, width: rawImage.width, height: rawImage.height };
+    const resultData = { maskData: mask.data, width: rawImage.width, height: rawImage.height };
+
+    // Free model + processor + WASM runtime to reclaim ~100MB before export steps
+    console.log("[main-thread] freeing model to reclaim memory...");
+    if (mainThreadModel && mainThreadModel.dispose) mainThreadModel.dispose();
+    mainThreadModel = null;
+    mainThreadProcessor = null;
+    mainThreadModelReady = false;
+    logMem("[main-thread] model freed");
+
+    return resultData;
 }
 
 function sendWorkerMessage(msg, transferables, timeoutMs = 0) {
