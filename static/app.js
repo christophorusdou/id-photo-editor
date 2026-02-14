@@ -11,6 +11,7 @@ const CONFIG = {
     BACKEND_URL: "/remove_background",
     MEDIAPIPE_VISION_WASM: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm",
     MEDIAPIPE_MODEL: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+    MAX_IMAGE_DIM: 2048,
 };
 
 const PRESETS = [
@@ -75,6 +76,30 @@ let modelReady = false;
 let wheelHandler = null;
 let lastBlobUrl = null;
 let faceLandmarker = null;
+
+// ---------------------------------------------------------------------------
+// Image Resize Helper (prevents mobile OOM crashes with 12MP+ photos)
+// ---------------------------------------------------------------------------
+function resizeImageIfNeeded(dataUrl, maxDim) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            if (img.width <= maxDim && img.height <= maxDim) {
+                resolve(dataUrl);
+                return;
+            }
+            const scale = maxDim / Math.max(img.width, img.height);
+            const w = Math.round(img.width * scale);
+            const h = Math.round(img.height * scale);
+            const canvas = document.createElement("canvas");
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL("image/jpeg", 0.92));
+        };
+        img.src = dataUrl;
+    });
+}
 
 // ---------------------------------------------------------------------------
 // DOM Elements
@@ -252,8 +277,8 @@ function handleFile(file) {
 
     state.imageFile = file;
     const reader = new FileReader();
-    reader.onload = () => {
-        state.imageDataUrl = reader.result;
+    reader.onload = async () => {
+        state.imageDataUrl = await resizeImageIfNeeded(reader.result, CONFIG.MAX_IMAGE_DIM);
         // Reset downstream state
         state.processedDataUrl = null;
         state.adjustedDataUrl = null;
