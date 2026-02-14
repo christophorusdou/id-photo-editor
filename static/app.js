@@ -84,7 +84,7 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 const MEMORY_TIERS = {
     high:   { processorSize: 1024, maxImageDim: 2048, label: "high" },
     medium: { processorSize: 768,  maxImageDim: 1200, label: "medium" },
-    low:    { processorSize: 64,   maxImageDim: 1200, label: "low" },
+    low:    { processorSize: 512,  maxImageDim: 1200, label: "low" },
 };
 
 function getMemoryTier() {
@@ -1134,6 +1134,92 @@ function destroyWorker() {
     modelReady = false;
 }
 
+// ---------------------------------------------------------------------------
+// Main-thread inference for low-tier devices (iPhone)
+// iOS Safari Web Workers have a ~100-150MB memory ceiling that's too small for
+// RMBG-1.4 (~45MB weights + ~25MB WASM + ~30-50MB activations). Running on the
+// main thread uses the page's larger memory budget (~500-700MB).
+// ---------------------------------------------------------------------------
+let mainThreadModel = null;
+let mainThreadProcessor = null;
+let mainThreadModelReady = false;
+
+async function loadMainThreadModel(processorSize) {
+    if (mainThreadModel && mainThreadProcessor) {
+        console.log("[main-thread] model already loaded");
+        return;
+    }
+    console.log("[main-thread] loading Transformers.js...");
+    const { AutoModel, AutoProcessor, env } = await import(
+        "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2"
+    );
+    env.allowLocalModels = false;
+
+    const MODEL_ID = "briaai/RMBG-1.4";
+
+    console.log("[main-thread] loading model...");
+    mainThreadModel = await AutoModel.from_pretrained(MODEL_ID, {
+        config: { model_type: "custom" },
+        progress_callback: (p) => {
+            if (p.status === "progress" && p.total) {
+                showProgress(Math.round((p.loaded / p.total) * 100));
+            }
+        },
+    });
+
+    console.log(`[main-thread] loading processor (${processorSize}px)...`);
+    mainThreadProcessor = await AutoProcessor.from_pretrained(MODEL_ID, {
+        config: {
+            do_normalize: true,
+            do_pad: false,
+            do_rescale: true,
+            do_resize: true,
+            image_mean: [0.5, 0.5, 0.5],
+            image_std: [1, 1, 1],
+            resample: 2,
+            rescale_factor: 0.00392156862745098,
+            size: { width: processorSize, height: processorSize },
+        },
+    });
+
+    mainThreadModelReady = true;
+    console.log("[main-thread] model ready");
+}
+
+async function runInferenceMainThread(imageDataUrl, processorSize) {
+    const { RawImage } = await import(
+        "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2"
+    );
+
+    if (!mainThreadModelReady) {
+        showStatus("Loading background removal model...", "info");
+        showProgress(0);
+        await loadMainThreadModel(processorSize);
+    }
+
+    showStatus("Removing background \u2014 the screen may freeze for 15\u201330s, this is normal...", "info");
+    logMem("[main-thread] inference start");
+
+    const rawImage = await RawImage.fromURL(imageDataUrl);
+    console.log(`[main-thread] image: ${rawImage.width}x${rawImage.height}`);
+
+    console.log(`[main-thread] running processor (${processorSize}px)...`);
+    const { pixel_values } = await mainThreadProcessor(rawImage);
+
+    console.log("[main-thread] running model inference...");
+    const { output } = await mainThreadModel({ input: pixel_values });
+
+    console.log("[main-thread] resizing mask...");
+    const maskData = output[0].mul(255).to("uint8");
+    const mask = await RawImage.fromTensor(maskData).resize(
+        rawImage.width,
+        rawImage.height,
+    );
+
+    logMem("[main-thread] inference done");
+    return { maskData: mask.data, width: rawImage.width, height: rawImage.height };
+}
+
 function sendWorkerMessage(msg, transferables, timeoutMs = 0) {
     return new Promise((resolve, reject) => {
         const w = getWorker();
@@ -1178,7 +1264,9 @@ function sendWorkerMessage(msg, transferables, timeoutMs = 0) {
 }
 
 async function preloadModel() {
-    if (modelReady) {
+    const useMainThread = memoryTier === MEMORY_TIERS.low;
+
+    if (useMainThread ? mainThreadModelReady : modelReady) {
         showStatus("Model already loaded.", "success");
         setTimeout(hideStatus, 2000);
         return;
@@ -1186,8 +1274,12 @@ async function preloadModel() {
     showStatus("Loading background removal model...", "info");
     showProgress(0);
     try {
-        await sendWorkerMessage({ type: "load-model", processorSize: memoryTier.processorSize }, [], 120000);
-        modelReady = true;
+        if (useMainThread) {
+            await loadMainThreadModel(memoryTier.processorSize);
+        } else {
+            await sendWorkerMessage({ type: "load-model", processorSize: memoryTier.processorSize }, [], 120000);
+            modelReady = true;
+        }
         dom.preloadButton.textContent = "Model Loaded";
         dom.preloadButton.disabled = true;
         showStatus("Model loaded and ready.", "success");
@@ -1204,54 +1296,61 @@ async function preloadModel() {
 // ---------------------------------------------------------------------------
 const TIER_ORDER = [MEMORY_TIERS.high, MEMORY_TIERS.medium, MEMORY_TIERS.low];
 
-async function attemptInference(imageDataUrl, processorSize) {
-    if (!modelReady) {
-        showStatus("Loading background removal model...", "info");
-        showProgress(0);
-        await sendWorkerMessage({ type: "load-model", processorSize }, [], 120000);
-        modelReady = true;
-        dom.preloadButton.textContent = "Model Loaded";
-        dom.preloadButton.disabled = true;
-    } else {
-        // Ensure processor is at the right size (cheap if already matching)
-        await sendWorkerMessage({ type: "load-model", processorSize }, [], 120000);
-    }
-
-    showStatus("Removing background...", "info");
-    logMem("removeBackground start");
-
+async function attemptInference(imageDataUrl, processorSize, useMainThread = false) {
     let result;
-    let sourceImg;
-    if (isMobile) {
-        sourceImg = new Image();
-        await new Promise((resolve, reject) => {
-            sourceImg.onload = resolve;
-            sourceImg.onerror = reject;
-            sourceImg.src = imageDataUrl;
-        });
-        logMem(`removeBackground decoded (${sourceImg.width}x${sourceImg.height}, ~${(sourceImg.width * sourceImg.height * 4 / 1024 / 1024).toFixed(1)}MB RGBA)`);
-        const offscreen = document.createElement("canvas");
-        offscreen.width = sourceImg.width;
-        offscreen.height = sourceImg.height;
-        const offCtx = offscreen.getContext("2d");
-        offCtx.drawImage(sourceImg, 0, 0);
-        const pixelData = offCtx.getImageData(0, 0, sourceImg.width, sourceImg.height);
-        offscreen.width = 0;
-        offscreen.height = 0;
-        logMem("removeBackground pixels extracted, canvas freed");
 
-        result = await sendWorkerMessage({
-            type: "inference",
-            imageData: pixelData.data.buffer,
-            width: sourceImg.width,
-            height: sourceImg.height,
-        }, [pixelData.data.buffer], 60000);
-        logMem("removeBackground inference done (buffer transferred)");
+    if (useMainThread) {
+        // Main-thread path for low-tier devices (iPhone)
+        console.log(`[bg-removal] using main-thread inference (processor=${processorSize}px)`);
+        result = await runInferenceMainThread(imageDataUrl, processorSize);
     } else {
-        result = await sendWorkerMessage({
-            type: "inference",
-            imageDataUrl,
-        }, [], 60000);
+        // Worker path for medium/high-tier devices
+        if (!modelReady) {
+            showStatus("Loading background removal model...", "info");
+            showProgress(0);
+            await sendWorkerMessage({ type: "load-model", processorSize }, [], 120000);
+            modelReady = true;
+            dom.preloadButton.textContent = "Model Loaded";
+            dom.preloadButton.disabled = true;
+        } else {
+            await sendWorkerMessage({ type: "load-model", processorSize }, [], 120000);
+        }
+
+        showStatus("Removing background...", "info");
+        logMem("removeBackground start");
+
+        let sourceImg;
+        if (isMobile) {
+            sourceImg = new Image();
+            await new Promise((resolve, reject) => {
+                sourceImg.onload = resolve;
+                sourceImg.onerror = reject;
+                sourceImg.src = imageDataUrl;
+            });
+            logMem(`removeBackground decoded (${sourceImg.width}x${sourceImg.height}, ~${(sourceImg.width * sourceImg.height * 4 / 1024 / 1024).toFixed(1)}MB RGBA)`);
+            const offscreen = document.createElement("canvas");
+            offscreen.width = sourceImg.width;
+            offscreen.height = sourceImg.height;
+            const offCtx = offscreen.getContext("2d");
+            offCtx.drawImage(sourceImg, 0, 0);
+            const pixelData = offCtx.getImageData(0, 0, sourceImg.width, sourceImg.height);
+            offscreen.width = 0;
+            offscreen.height = 0;
+            logMem("removeBackground pixels extracted, canvas freed");
+
+            result = await sendWorkerMessage({
+                type: "inference",
+                imageData: pixelData.data.buffer,
+                width: sourceImg.width,
+                height: sourceImg.height,
+            }, [pixelData.data.buffer], 60000);
+            logMem("removeBackground inference done (buffer transferred)");
+        } else {
+            result = await sendWorkerMessage({
+                type: "inference",
+                imageDataUrl,
+            }, [], 60000);
+        }
     }
 
     const { maskData, width, height } = result;
@@ -1260,14 +1359,12 @@ async function attemptInference(imageDataUrl, processorSize) {
     canvas.height = height;
     const ctx = canvas.getContext("2d");
 
-    if (!sourceImg) {
-        sourceImg = new Image();
-        await new Promise((resolve, reject) => {
-            sourceImg.onload = resolve;
-            sourceImg.onerror = reject;
-            sourceImg.src = imageDataUrl;
-        });
-    }
+    const sourceImg = new Image();
+    await new Promise((resolve, reject) => {
+        sourceImg.onload = resolve;
+        sourceImg.onerror = reject;
+        sourceImg.src = imageDataUrl;
+    });
     ctx.drawImage(sourceImg, 0, 0);
 
     const imageData = ctx.getImageData(0, 0, width, height);
@@ -1289,12 +1386,14 @@ async function removeBackgroundBrowser(imageDataUrl) {
 
     for (let i = 0; i < tiersToTry.length; i++) {
         const tier = tiersToTry[i];
+        // Low tier (iPhone) uses main thread — worker memory ceiling is too low
+        const useMainThread = tier === MEMORY_TIERS.low;
         try {
-            console.log(`[bg-removal] attempting at ${tier.label} tier (processor=${tier.processorSize}px)`);
-            return await attemptInference(imageDataUrl, tier.processorSize);
+            console.log(`[bg-removal] attempting at ${tier.label} tier (processor=${tier.processorSize}px, mainThread=${useMainThread})`);
+            return await attemptInference(imageDataUrl, tier.processorSize, useMainThread);
         } catch (err) {
             console.warn(`[bg-removal] failed at ${tier.label} tier:`, err.message);
-            destroyWorker();
+            if (!useMainThread) destroyWorker();
 
             if (i < tiersToTry.length - 1) {
                 const nextTier = tiersToTry[i + 1];
