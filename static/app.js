@@ -485,6 +485,9 @@ function setupStep4() {
     // Enable auto-center button if face data is available
     dom.autoCenterFace.disabled = !state.faceData;
 
+    // Skip cropper init when one-click mode handles it via initializeCropperAsync()
+    if (state.isOneClickMode) return;
+
     // If dimensions are already set, init cropper once image loads
     const w = parseFloat(dom.widthInput.value);
     const h = parseFloat(dom.heightInput.value);
@@ -497,9 +500,8 @@ function setupStep4() {
     }
 }
 
-function populatePresets() {
-    const select = dom.presetSelect;
-    // Keep only the first "Custom" option
+function populatePresetSelect(select) {
+    // Keep only the first option (e.g. "Custom" or "Select ID type...")
     while (select.children.length > 1) {
         select.removeChild(select.lastChild);
     }
@@ -526,32 +528,12 @@ function populatePresets() {
     });
 }
 
+function populatePresets() {
+    populatePresetSelect(dom.presetSelect);
+}
+
 function populateQuickPresets() {
-    const select = dom.quickPresetSelect;
-    while (select.children.length > 1) {
-        select.removeChild(select.lastChild);
-    }
-
-    const regions = {};
-    PRESETS.forEach((p, i) => {
-        if (!regions[p.region]) regions[p.region] = [];
-        regions[p.region].push({ ...p, index: i });
-    });
-
-    Object.entries(regions).forEach(([region, presets]) => {
-        const group = document.createElement("optgroup");
-        group.label = region;
-        presets.forEach((p) => {
-            const opt = document.createElement("option");
-            const sizeStr = p.unit === "inches"
-                ? `${p.width}\u00d7${p.height}\u2033`
-                : `${Math.round(p.width * 10)}\u00d7${Math.round(p.height * 10)}mm`;
-            opt.value = p.index;
-            opt.textContent = `${p.label} (${sizeStr})`;
-            group.appendChild(opt);
-        });
-        select.appendChild(group);
-    });
+    populatePresetSelect(dom.quickPresetSelect);
 }
 
 function applyPreset(index) {
@@ -569,7 +551,7 @@ function applyPreset(index) {
     initializeCropper();
 }
 
-function initializeCropper() {
+function initializeCropper(onReady) {
     if (cropper) cropper.destroy();
     if (wheelHandler) {
         dom.image.removeEventListener("wheel", wheelHandler);
@@ -587,35 +569,44 @@ function initializeCropper() {
         return;
     }
 
-    cropper = new Cropper(dom.image, {
+    const options = {
         aspectRatio: widthValue / heightValue,
         dragMode: "crop",
-    });
-
-    dom.step4Next.disabled = false;
-    dom.zoomIn.disabled = false;
-    dom.zoomOut.disabled = false;
-    dom.toggleMode.disabled = false;
-
-    // Adaptive zoom
-    wheelHandler = (event) => {
-        event.preventDefault();
-        const speedFactor = Math.abs(event.deltaY) / 100;
-        const zoomFactor = Math.min(CONFIG.BASE_ZOOM * speedFactor, CONFIG.MAX_ZOOM);
-        const delta = event.deltaY > 0 ? -zoomFactor : zoomFactor;
-        cropper.zoom(delta);
     };
-    dom.image.addEventListener("wheel", wheelHandler);
+
+    const enableControls = () => {
+        dom.step4Next.disabled = false;
+        dom.zoomIn.disabled = false;
+        dom.zoomOut.disabled = false;
+        dom.toggleMode.disabled = false;
+
+        // Adaptive zoom
+        wheelHandler = (event) => {
+            event.preventDefault();
+            const speedFactor = Math.abs(event.deltaY) / 100;
+            const zoomFactor = Math.min(CONFIG.BASE_ZOOM * speedFactor, CONFIG.MAX_ZOOM);
+            const delta = event.deltaY > 0 ? -zoomFactor : zoomFactor;
+            cropper.zoom(delta);
+        };
+        dom.image.addEventListener("wheel", wheelHandler);
+    };
+
+    if (onReady) {
+        options.ready = () => {
+            enableControls();
+            onReady();
+        };
+    }
+
+    cropper = new Cropper(dom.image, options);
+
+    if (!onReady) {
+        enableControls();
+    }
 }
 
 // Returns a promise that resolves when CropperJS is fully ready
 function initializeCropperAsync() {
-    if (cropper) cropper.destroy();
-    if (wheelHandler) {
-        dom.image.removeEventListener("wheel", wheelHandler);
-        wheelHandler = null;
-    }
-
     const widthValue = parseFloat(dom.widthInput.value);
     const heightValue = parseFloat(dom.heightInput.value);
 
@@ -624,27 +615,7 @@ function initializeCropperAsync() {
     }
 
     return new Promise((resolve) => {
-        cropper = new Cropper(dom.image, {
-            aspectRatio: widthValue / heightValue,
-            dragMode: "crop",
-            ready() {
-                dom.step4Next.disabled = false;
-                dom.zoomIn.disabled = false;
-                dom.zoomOut.disabled = false;
-                dom.toggleMode.disabled = false;
-
-                wheelHandler = (event) => {
-                    event.preventDefault();
-                    const speedFactor = Math.abs(event.deltaY) / 100;
-                    const zoomFactor = Math.min(CONFIG.BASE_ZOOM * speedFactor, CONFIG.MAX_ZOOM);
-                    const delta = event.deltaY > 0 ? -zoomFactor : zoomFactor;
-                    cropper.zoom(delta);
-                };
-                dom.image.addEventListener("wheel", wheelHandler);
-
-                resolve();
-            },
-        });
+        initializeCropper(resolve);
     });
 }
 
@@ -683,6 +654,8 @@ function setupStep5() {
 async function initFaceLandmarker() {
     if (faceLandmarker) return faceLandmarker;
 
+    showStatus("Loading face detection model...", "info");
+
     const { FaceLandmarker, FilesetResolver } = await import(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs"
     );
@@ -697,6 +670,9 @@ async function initFaceLandmarker() {
         minFaceDetectionConfidence: 0.5,
         minFacePresenceConfidence: 0.5,
     });
+
+    showStatus("Face detection model loaded.", "success");
+
     return faceLandmarker;
 }
 
@@ -997,6 +973,8 @@ async function oneClickGenerate() {
 
         // Navigate to export
         goToStep(5);
+
+        state.isOneClickMode = false;
 
         if (state.complianceResult.allPassed) {
             showStatus("ID photo generated. All compliance checks passed!", "success");
@@ -1355,7 +1333,7 @@ function attachEventListeners() {
     // Step 5
     dom.step5Back.addEventListener("click", () => goToStep(4));
 
-    dom.manualAdjustButton.addEventListener("click", () => goToStep(3));
+    dom.manualAdjustButton.addEventListener("click", () => goToStep(4));
 
     dom.step5StartOver.addEventListener("click", () => {
         state.imageFile = null;
