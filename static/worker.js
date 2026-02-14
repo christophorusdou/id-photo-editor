@@ -11,39 +11,53 @@ const MODEL_ID = "briaai/RMBG-1.4";
 
 let model = null;
 let processor = null;
+let currentProcessorSize = 1024;
+
+function makeProcessorConfig(size) {
+    return {
+        do_normalize: true,
+        do_pad: false,
+        do_rescale: true,
+        do_resize: true,
+        image_mean: [0.5, 0.5, 0.5],
+        image_std: [1, 1, 1],
+        resample: 2,
+        rescale_factor: 0.00392156862745098,
+        size: { width: size, height: size },
+    };
+}
 
 async function loadModel(data) {
-    if (model && processor) {
+    const requestedSize = (data && data.processorSize) || 1024;
+
+    // If model and processor exist and size matches, skip
+    if (model && processor && currentProcessorSize === requestedSize) {
         self.postMessage({ type: "model-ready" });
         return;
     }
 
     try {
-        model = await AutoModel.from_pretrained(MODEL_ID, {
-            config: { model_type: "custom" },
-            progress_callback: (p) => {
-                if (p.status === "progress" && p.total) {
-                    self.postMessage({
-                        type: "progress",
-                        percent: Math.round((p.loaded / p.total) * 100),
-                    });
-                }
-            },
-        });
+        // Load model only once (expensive — downloads ~45MB ONNX weights)
+        if (!model) {
+            model = await AutoModel.from_pretrained(MODEL_ID, {
+                config: { model_type: "custom" },
+                progress_callback: (p) => {
+                    if (p.status === "progress" && p.total) {
+                        self.postMessage({
+                            type: "progress",
+                            percent: Math.round((p.loaded / p.total) * 100),
+                        });
+                    }
+                },
+            });
+        }
 
+        // Create/recreate processor at requested size (cheap)
+        console.log("[worker] processor size:", requestedSize);
         processor = await AutoProcessor.from_pretrained(MODEL_ID, {
-            config: {
-                do_normalize: true,
-                do_pad: false,
-                do_rescale: true,
-                do_resize: true,
-                image_mean: [0.5, 0.5, 0.5],
-                image_std: [1, 1, 1],
-                resample: 2,
-                rescale_factor: 0.00392156862745098,
-                size: { width: 1024, height: 1024 },
-            },
+            config: makeProcessorConfig(requestedSize),
         });
+        currentProcessorSize = requestedSize;
 
         self.postMessage({ type: "model-ready" });
     } catch (err) {
@@ -70,7 +84,7 @@ async function runInference(data) {
         console.log(`[worker] desktop path: ${rawImage.width}x${rawImage.height}`);
     }
 
-    console.log("[worker] running processor...");
+    console.log(`[worker] running processor (${currentProcessorSize}x${currentProcessorSize})...`);
     const { pixel_values } = await processor(rawImage);
     console.log("[worker] running model inference...");
     const { output } = await model({ input: pixel_values });

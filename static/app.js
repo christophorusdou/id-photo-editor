@@ -81,6 +81,36 @@ let faceLandmarker = null;
 const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
     || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
 
+const MEMORY_TIERS = {
+    high:   { processorSize: 1024, maxImageDim: 2048, label: "high" },
+    medium: { processorSize: 768,  maxImageDim: 1200, label: "medium" },
+    low:    { processorSize: 512,  maxImageDim: 1200, label: "low" },
+};
+
+function getMemoryTier() {
+    if (!isMobile) return MEMORY_TIERS.high;
+
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
+        || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+    if (isIOS) {
+        const minDim = Math.min(screen.width, screen.height);
+        return minDim >= 768 ? MEMORY_TIERS.medium : MEMORY_TIERS.low;
+    }
+
+    const mem = navigator.deviceMemory;
+    if (mem) {
+        if (mem >= 8) return MEMORY_TIERS.high;
+        if (mem >= 4) return MEMORY_TIERS.medium;
+        return MEMORY_TIERS.low;
+    }
+
+    return MEMORY_TIERS.medium;
+}
+
+const memoryTier = getMemoryTier();
+console.log(`[tier] ${memoryTier.label}: processor=${memoryTier.processorSize}px, maxImage=${memoryTier.maxImageDim}px`);
+
 function logMem(label) {
     if (!isMobile) return;
     const mb = (bytes) => (bytes / 1024 / 1024).toFixed(1) + "MB";
@@ -295,7 +325,7 @@ function handleFile(file) {
     state.imageFile = file;
     const reader = new FileReader();
     reader.onload = async () => {
-        const maxDim = isMobile ? CONFIG.MAX_IMAGE_DIM_MOBILE : CONFIG.MAX_IMAGE_DIM;
+        const maxDim = memoryTier.maxImageDim;
         logMem(`handleFile start (maxDim=${maxDim}, rawLen=${(reader.result.length / 1024 / 1024).toFixed(1)}MB)`);
         state.imageDataUrl = await resizeImageIfNeeded(reader.result, maxDim);
         logMem("handleFile resized");
@@ -1091,14 +1121,29 @@ async function checkBackend() {
 // ---------------------------------------------------------------------------
 function getWorker() {
     if (!worker) {
-        worker = new Worker("static/worker.js?v=3", { type: "module" });
+        worker = new Worker("static/worker.js?v=4", { type: "module" });
     }
     return worker;
 }
 
-function sendWorkerMessage(msg, transferables) {
+function destroyWorker() {
+    if (worker) {
+        worker.terminate();
+        worker = null;
+    }
+    modelReady = false;
+}
+
+function sendWorkerMessage(msg, transferables, timeoutMs = 0) {
     return new Promise((resolve, reject) => {
         const w = getWorker();
+        let timer = null;
+
+        function cleanup() {
+            w.removeEventListener("message", onMessage);
+            w.removeEventListener("error", onError);
+            if (timer) clearTimeout(timer);
+        }
 
         function onMessage(e) {
             const { type } = e.data;
@@ -1106,8 +1151,7 @@ function sendWorkerMessage(msg, transferables) {
                 showProgress(e.data.percent);
                 return;
             }
-            w.removeEventListener("message", onMessage);
-            w.removeEventListener("error", onError);
+            cleanup();
             if (type === "error") {
                 reject(new Error(e.data.message));
             } else {
@@ -1116,9 +1160,15 @@ function sendWorkerMessage(msg, transferables) {
         }
 
         function onError(e) {
-            w.removeEventListener("message", onMessage);
-            w.removeEventListener("error", onError);
+            cleanup();
             reject(new Error(e.message || "Worker error"));
+        }
+
+        if (timeoutMs > 0) {
+            timer = setTimeout(() => {
+                cleanup();
+                reject(new Error("Worker timeout"));
+            }, timeoutMs);
         }
 
         w.addEventListener("message", onMessage);
@@ -1136,7 +1186,7 @@ async function preloadModel() {
     showStatus("Loading background removal model...", "info");
     showProgress(0);
     try {
-        await sendWorkerMessage({ type: "load-model" });
+        await sendWorkerMessage({ type: "load-model", processorSize: memoryTier.processorSize }, [], 120000);
         modelReady = true;
         dom.preloadButton.textContent = "Model Loaded";
         dom.preloadButton.disabled = true;
@@ -1150,16 +1200,21 @@ async function preloadModel() {
 }
 
 // ---------------------------------------------------------------------------
-// Background removal — browser (via worker)
+// Background removal — browser (via worker) with crash recovery
 // ---------------------------------------------------------------------------
-async function removeBackgroundBrowser(imageDataUrl) {
+const TIER_ORDER = [MEMORY_TIERS.high, MEMORY_TIERS.medium, MEMORY_TIERS.low];
+
+async function attemptInference(imageDataUrl, processorSize) {
     if (!modelReady) {
         showStatus("Loading background removal model...", "info");
         showProgress(0);
-        await sendWorkerMessage({ type: "load-model" });
+        await sendWorkerMessage({ type: "load-model", processorSize }, [], 120000);
         modelReady = true;
         dom.preloadButton.textContent = "Model Loaded";
         dom.preloadButton.disabled = true;
+    } else {
+        // Ensure processor is at the right size (cheap if already matching)
+        await sendWorkerMessage({ type: "load-model", processorSize }, [], 120000);
     }
 
     showStatus("Removing background...", "info");
@@ -1168,7 +1223,6 @@ async function removeBackgroundBrowser(imageDataUrl) {
     let result;
     let sourceImg;
     if (isMobile) {
-        // Mobile path: extract raw pixels and transfer to worker (avoids double-decode)
         sourceImg = new Image();
         await new Promise((resolve, reject) => {
             sourceImg.onload = resolve;
@@ -1182,7 +1236,6 @@ async function removeBackgroundBrowser(imageDataUrl) {
         const offCtx = offscreen.getContext("2d");
         offCtx.drawImage(sourceImg, 0, 0);
         const pixelData = offCtx.getImageData(0, 0, sourceImg.width, sourceImg.height);
-        // Free the offscreen canvas
         offscreen.width = 0;
         offscreen.height = 0;
         logMem("removeBackground pixels extracted, canvas freed");
@@ -1192,14 +1245,13 @@ async function removeBackgroundBrowser(imageDataUrl) {
             imageData: pixelData.data.buffer,
             width: sourceImg.width,
             height: sourceImg.height,
-        }, [pixelData.data.buffer]);
+        }, [pixelData.data.buffer], 60000);
         logMem("removeBackground inference done (buffer transferred)");
     } else {
-        // Desktop path: send data URL string
         result = await sendWorkerMessage({
             type: "inference",
             imageDataUrl,
-        });
+        }, [], 60000);
     }
 
     const { maskData, width, height } = result;
@@ -1208,8 +1260,6 @@ async function removeBackgroundBrowser(imageDataUrl) {
     canvas.height = height;
     const ctx = canvas.getContext("2d");
 
-    // Draw original image and apply mask as alpha (keep transparent bg)
-    // On mobile, reuse already-decoded image to avoid redundant ~4MB decode
     if (!sourceImg) {
         sourceImg = new Image();
         await new Promise((resolve, reject) => {
@@ -1230,6 +1280,34 @@ async function removeBackgroundBrowser(imageDataUrl) {
     const resultDataUrl = canvas.toDataURL("image/png");
     logMem("removeBackground done");
     return resultDataUrl;
+}
+
+async function removeBackgroundBrowser(imageDataUrl) {
+    // Build list of tiers to try, starting from current tier and stepping down
+    const startIdx = TIER_ORDER.indexOf(memoryTier);
+    const tiersToTry = TIER_ORDER.slice(startIdx);
+
+    for (let i = 0; i < tiersToTry.length; i++) {
+        const tier = tiersToTry[i];
+        try {
+            console.log(`[bg-removal] attempting at ${tier.label} tier (processor=${tier.processorSize}px)`);
+            return await attemptInference(imageDataUrl, tier.processorSize);
+        } catch (err) {
+            console.warn(`[bg-removal] failed at ${tier.label} tier:`, err.message);
+            destroyWorker();
+
+            if (i < tiersToTry.length - 1) {
+                const nextTier = tiersToTry[i + 1];
+                showStatus(`Retrying at lower quality (${nextTier.processorSize}px)...`, "info");
+                console.log(`[bg-removal] retrying at ${nextTier.label} tier`);
+            } else {
+                throw new Error(
+                    "Background removal failed — your device may not have enough memory. " +
+                    "Try unchecking \"Remove background\" and using the photo without BG removal."
+                );
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
