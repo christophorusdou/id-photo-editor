@@ -65,6 +65,7 @@ const state = {
     faceData: null,
     complianceResult: null,
     isOneClickMode: false,
+    selectedPresetIndex: "",
 };
 
 let cropper = null;
@@ -260,6 +261,7 @@ function handleFile(file) {
         state.faceData = null;
         state.complianceResult = null;
         state.isOneClickMode = false;
+        state.selectedPresetIndex = "";
 
         dom.previewImage.src = state.imageDataUrl;
         dom.dropZonePrompt.classList.add("hidden");
@@ -466,9 +468,11 @@ function updateSliderValues() {
 // Step 4: Crop
 // ---------------------------------------------------------------------------
 function setupStep4() {
-    const savedPreset = dom.presetSelect.value;
     populatePresets();
-    if (savedPreset) dom.presetSelect.value = savedPreset;
+    // Restore preset from state (DOM value is lost when select is rebuilt)
+    if (state.selectedPresetIndex !== "") {
+        dom.presetSelect.value = state.selectedPresetIndex;
+    }
 
     const src = state.adjustedDataUrl || state.processedDataUrl || state.imageDataUrl;
     dom.image.src = src;
@@ -703,7 +707,7 @@ async function detectFace(imageElement) {
     const eyeCenterX = ((leftEyeInner.x + rightEyeInner.x) / 2) * imgW;
     const eyeCenterY = ((leftEyeInner.y + rightEyeInner.y) / 2) * imgH;
 
-    // Face bounding box
+    // Face bounding box (forehead landmark to chin)
     const faceTop = foreheadCenter.y * imgH;
     const faceBottom = chin.y * imgH;
     const faceLeft = rightCheek.x * imgW;
@@ -712,6 +716,10 @@ async function detectFace(imageElement) {
     const faceWidth = faceRight - faceLeft;
     const faceCenterX = (faceLeft + faceRight) / 2;
     const faceCenterY = (faceTop + faceBottom) / 2;
+
+    // Estimated full head (forehead landmark is at hairline, not top of skull)
+    const headTop = Math.max(0, faceTop - faceHeight * 0.25);
+    const headHeight = faceBottom - headTop;
 
     // Head tilt (roll) from eye alignment
     const rollAngle = Math.atan2(
@@ -725,6 +733,7 @@ async function detectFace(imageElement) {
         faceCenterX, faceCenterY,
         faceTop, faceBottom, faceLeft, faceRight,
         faceHeight, faceWidth,
+        headTop, headHeight,
         rollAngle,
         imgW, imgH,
     };
@@ -752,17 +761,17 @@ function applyCropFromFaceData(faceData) {
 
     // Face geometry in CropperJS canvas coordinates
     const faceCenterXCanvas = faceData.faceCenterX * scaleX + canvasData.left;
-    const faceTopCanvas = faceData.faceTop * scaleY + canvasData.top;
-    const faceHeightCanvas = faceData.faceHeight * scaleY;
+    const headTopCanvas = faceData.headTop * scaleY + canvasData.top;
+    const headHeightCanvas = faceData.headHeight * scaleY;
 
-    // Target: head occupies ~60% of frame height
+    // Target: head (including top of skull) occupies ~60% of frame height
     const targetHeadRatio = 0.60;
-    const cropHeight = faceHeightCanvas / targetHeadRatio;
+    const cropHeight = headHeightCanvas / targetHeadRatio;
     const cropWidth = cropHeight * aspectRatio;
 
-    // Vertical positioning: ~12% margin above head
+    // Vertical positioning: ~12% margin above top of head
     const headMarginTop = 0.12;
-    const cropTop = faceTopCanvas - (cropHeight * headMarginTop);
+    const cropTop = headTopCanvas - (cropHeight * headMarginTop);
     const cropLeft = faceCenterXCanvas - (cropWidth / 2);
 
     // Clamp to container boundaries
@@ -788,8 +797,8 @@ function checkCompliance(faceData, presetIndex) {
     const cropData = cropper.getData();
     const checks = [];
 
-    // 1. Head-to-frame height ratio
-    const headRatio = faceData.faceHeight / cropData.height;
+    // 1. Head-to-frame height ratio (using estimated full head height)
+    const headRatio = faceData.headHeight / cropData.height;
     checks.push({
         id: "head-height",
         label: `Head height: ${(headRatio * 100).toFixed(0)}% of frame`,
@@ -839,8 +848,8 @@ function checkCompliance(faceData, presetIndex) {
         passed: faceInFrame,
     });
 
-    // 6. Top margin (space above head)
-    const topMargin = (faceData.faceTop - cropData.y) / cropData.height;
+    // 6. Top margin (space above top of head)
+    const topMargin = (faceData.headTop - cropData.y) / cropData.height;
     checks.push({
         id: "top-margin",
         label: `Top margin: ${(topMargin * 100).toFixed(0)}%`,
@@ -936,6 +945,7 @@ async function oneClickGenerate() {
         dom.heightInput.value = preset.height;
         dom.unitSelect.value = preset.unit === "inches" ? "inches" : "cm";
         dom.presetSelect.value = presetIndex;
+        state.selectedPresetIndex = presetIndex;
 
         // Navigate to step 4 to initialize CropperJS with the image
         const src = state.adjustedDataUrl || state.processedDataUrl || state.imageDataUrl;
@@ -1269,16 +1279,19 @@ function attachEventListeners() {
     });
 
     dom.presetSelect.addEventListener("change", () => {
+        state.selectedPresetIndex = dom.presetSelect.value;
         applyPreset(dom.presetSelect.value);
     });
 
     dom.widthInput.addEventListener("input", () => {
         dom.presetSelect.value = "";
+        state.selectedPresetIndex = "";
         initializeCropper();
     });
 
     dom.heightInput.addEventListener("input", () => {
         dom.presetSelect.value = "";
+        state.selectedPresetIndex = "";
         initializeCropper();
     });
 
@@ -1346,6 +1359,7 @@ function attachEventListeners() {
         state.faceData = null;
         state.complianceResult = null;
         state.isOneClickMode = false;
+        state.selectedPresetIndex = "";
         if (cropper) { cropper.destroy(); cropper = null; }
         if (wheelHandler) {
             dom.image.removeEventListener("wheel", wheelHandler);
