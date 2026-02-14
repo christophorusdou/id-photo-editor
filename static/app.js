@@ -84,7 +84,7 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 const MEMORY_TIERS = {
     high:   { processorSize: 1024, maxImageDim: 2048, label: "high" },
     medium: { processorSize: 768,  maxImageDim: 1200, label: "medium" },
-    low:    { processorSize: 512,  maxImageDim: 1200, label: "low" },
+    low:    { processorSize: 64,   maxImageDim: 1200, label: "low" },
 };
 
 function getMemoryTier() {
