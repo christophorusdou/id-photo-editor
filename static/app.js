@@ -1298,6 +1298,7 @@ const TIER_ORDER = [MEMORY_TIERS.high, MEMORY_TIERS.medium, MEMORY_TIERS.low];
 
 async function attemptInference(imageDataUrl, processorSize, useMainThread = false) {
     let result;
+    let sourceImg = null;
 
     if (useMainThread) {
         // Main-thread path for low-tier devices (iPhone)
@@ -1319,7 +1320,6 @@ async function attemptInference(imageDataUrl, processorSize, useMainThread = fal
         showStatus("Removing background...", "info");
         logMem("removeBackground start");
 
-        let sourceImg;
         if (isMobile) {
             sourceImg = new Image();
             await new Promise((resolve, reject) => {
@@ -1359,12 +1359,14 @@ async function attemptInference(imageDataUrl, processorSize, useMainThread = fal
     canvas.height = height;
     const ctx = canvas.getContext("2d");
 
-    const sourceImg = new Image();
-    await new Promise((resolve, reject) => {
-        sourceImg.onload = resolve;
-        sourceImg.onerror = reject;
-        sourceImg.src = imageDataUrl;
-    });
+    if (!sourceImg) {
+        sourceImg = new Image();
+        await new Promise((resolve, reject) => {
+            sourceImg.onload = resolve;
+            sourceImg.onerror = reject;
+            sourceImg.src = imageDataUrl;
+        });
+    }
     ctx.drawImage(sourceImg, 0, 0);
 
     const imageData = ctx.getImageData(0, 0, width, height);
