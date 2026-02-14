@@ -466,7 +466,9 @@ function updateSliderValues() {
 // Step 4: Crop
 // ---------------------------------------------------------------------------
 function setupStep4() {
+    const savedPreset = dom.presetSelect.value;
     populatePresets();
+    if (savedPreset) dom.presetSelect.value = savedPreset;
 
     const src = state.adjustedDataUrl || state.processedDataUrl || state.imageDataUrl;
     dom.image.src = src;
