@@ -69,7 +69,7 @@
             href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
             rel="stylesheet"
         />
-        <link rel="stylesheet" href="static/style.css?v=2" />
+        <link rel="stylesheet" href="static/style.css?v=3" />
     </head>
     <body>
         <!-- Landing Page -->
@@ -210,6 +210,10 @@
                                     Generate ID Photo
                                 </button>
                             </div>
+                            <label class="one-click-option hidden" id="skip-bg-option">
+                                <input type="checkbox" id="skip-bg-checkbox" checked />
+                                Remove background
+                            </label>
                             <button class="btn-text" id="manual-mode-link" type="button">or continue with manual steps</button>
                         </div>
                     </div>
@@ -407,7 +411,7 @@
         </div> <!-- /app-shell -->
 
         <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
-        <script type="module" src="static/app.js?v=3"></script>
+        <script type="module" src="static/app.js?v=4"></script>
         <!-- Cloudflare Web Analytics (production only) -->
         <script>
         if (location.hostname === 'id-photo-editor.cdrift.com') {

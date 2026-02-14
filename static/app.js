@@ -144,6 +144,8 @@ const dom = {
     oneClickPanel: $("one-click-panel"),
     quickPresetSelect: $("quick-preset-select"),
     oneClickButton: $("one-click-button"),
+    skipBgOption: $("skip-bg-option"),
+    skipBgCheckbox: $("skip-bg-checkbox"),
     manualModeLink: $("manual-mode-link"),
 
     // Step 2
@@ -956,6 +958,8 @@ async function oneClickGenerate() {
         });
 
         const faceData = await detectFace(tempImg);
+        tempImg.src = "";
+        logMem("tempImg freed");
         if (!faceData) {
             showStatus("No face detected. Please use manual steps.", "error");
             state.isOneClickMode = false;
@@ -964,19 +968,31 @@ async function oneClickGenerate() {
         }
         state.faceData = faceData;
 
-        // Step 2: Background removal
-        const mode = getInferenceMode();
-        if (mode === "backend") {
-            const available = await checkBackend();
-            if (!available) {
-                showStatus("Backend not available. Switch to Browser mode in Settings.", "error");
-                state.isOneClickMode = false;
-                dom.oneClickButton.disabled = false;
-                return;
-            }
-            state.processedDataUrl = await removeBackgroundBackend(state.imageFile);
+        // Free MediaPipe on mobile before BG removal to reclaim ~30-50MB
+        if (isMobile && faceLandmarker) {
+            faceLandmarker.close();
+            faceLandmarker = null;
+            logMem("MediaPipe closed");
+        }
+
+        // Step 2: Background removal (skip if user opted out on mobile)
+        if (dom.skipBgCheckbox && !dom.skipBgCheckbox.checked) {
+            console.log("[one-click] skipping BG removal (user opted out)");
+            state.processedDataUrl = state.imageDataUrl;
         } else {
-            state.processedDataUrl = await removeBackgroundBrowser(state.imageDataUrl);
+            const mode = getInferenceMode();
+            if (mode === "backend") {
+                const available = await checkBackend();
+                if (!available) {
+                    showStatus("Backend not available. Switch to Browser mode in Settings.", "error");
+                    state.isOneClickMode = false;
+                    dom.oneClickButton.disabled = false;
+                    return;
+                }
+                state.processedDataUrl = await removeBackgroundBackend(state.imageFile);
+            } else {
+                state.processedDataUrl = await removeBackgroundBrowser(state.imageDataUrl);
+            }
         }
 
         // Step 3: Skip adjustments (use defaults for one-click)
@@ -1150,21 +1166,22 @@ async function removeBackgroundBrowser(imageDataUrl) {
     logMem("removeBackground start");
 
     let result;
+    let sourceImg;
     if (isMobile) {
         // Mobile path: extract raw pixels and transfer to worker (avoids double-decode)
-        const img = new Image();
+        sourceImg = new Image();
         await new Promise((resolve, reject) => {
-            img.onload = resolve;
-            img.onerror = reject;
-            img.src = imageDataUrl;
+            sourceImg.onload = resolve;
+            sourceImg.onerror = reject;
+            sourceImg.src = imageDataUrl;
         });
-        logMem(`removeBackground decoded (${img.width}x${img.height}, ~${(img.width * img.height * 4 / 1024 / 1024).toFixed(1)}MB RGBA)`);
+        logMem(`removeBackground decoded (${sourceImg.width}x${sourceImg.height}, ~${(sourceImg.width * sourceImg.height * 4 / 1024 / 1024).toFixed(1)}MB RGBA)`);
         const offscreen = document.createElement("canvas");
-        offscreen.width = img.width;
-        offscreen.height = img.height;
+        offscreen.width = sourceImg.width;
+        offscreen.height = sourceImg.height;
         const offCtx = offscreen.getContext("2d");
-        offCtx.drawImage(img, 0, 0);
-        const pixelData = offCtx.getImageData(0, 0, img.width, img.height);
+        offCtx.drawImage(sourceImg, 0, 0);
+        const pixelData = offCtx.getImageData(0, 0, sourceImg.width, sourceImg.height);
         // Free the offscreen canvas
         offscreen.width = 0;
         offscreen.height = 0;
@@ -1173,8 +1190,8 @@ async function removeBackgroundBrowser(imageDataUrl) {
         result = await sendWorkerMessage({
             type: "inference",
             imageData: pixelData.data.buffer,
-            width: img.width,
-            height: img.height,
+            width: sourceImg.width,
+            height: sourceImg.height,
         }, [pixelData.data.buffer]);
         logMem("removeBackground inference done (buffer transferred)");
     } else {
@@ -1192,13 +1209,16 @@ async function removeBackgroundBrowser(imageDataUrl) {
     const ctx = canvas.getContext("2d");
 
     // Draw original image and apply mask as alpha (keep transparent bg)
-    const origImg = new Image();
-    await new Promise((resolve, reject) => {
-        origImg.onload = resolve;
-        origImg.onerror = reject;
-        origImg.src = imageDataUrl;
-    });
-    ctx.drawImage(origImg, 0, 0);
+    // On mobile, reuse already-decoded image to avoid redundant ~4MB decode
+    if (!sourceImg) {
+        sourceImg = new Image();
+        await new Promise((resolve, reject) => {
+            sourceImg.onload = resolve;
+            sourceImg.onerror = reject;
+            sourceImg.src = imageDataUrl;
+        });
+    }
+    ctx.drawImage(sourceImg, 0, 0);
 
     const imageData = ctx.getImageData(0, 0, width, height);
     for (let i = 0; i < maskData.length; i++) {
@@ -1578,3 +1598,8 @@ populateQuickPresets();
 attachEventListeners();
 updateProgressIndicator();
 checkBackend();
+
+// Show "Remove background" opt-out checkbox on mobile only
+if (isMobile && dom.skipBgOption) {
+    dom.skipBgOption.classList.remove("hidden");
+}

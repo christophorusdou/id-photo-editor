@@ -1068,6 +1068,21 @@ img {
     box-shadow: 0 0 0 3px var(--color-primary-light);
 }
 
+.one-click-option {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    justify-content: center;
+    margin-bottom: var(--sp-2);
+}
+
+.one-click-option input[type="checkbox"] {
+    accent-color: var(--color-primary);
+}
+
 /* ---------------------------------------------------------------------------
    Compliance Panel (Step 5)
    --------------------------------------------------------------------------- */
