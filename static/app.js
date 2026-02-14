@@ -9,7 +9,7 @@ const CONFIG = {
     BASE_ZOOM: 0.02,
     MAX_ZOOM: 0.1,
     BACKEND_URL: "/remove_background",
-    MEDIAPIPE_VISION_WASM: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm",
+    MEDIAPIPE_VISION_WASM: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm",
     MEDIAPIPE_MODEL: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
 };
 
@@ -657,7 +657,7 @@ async function initFaceLandmarker() {
     showStatus("Loading face detection model...", "info");
 
     const { FaceLandmarker, FilesetResolver } = await import(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs"
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/vision_bundle.mjs"
     );
 
     const vision = await FilesetResolver.forVisionTasks(CONFIG.MEDIAPIPE_VISION_WASM);
