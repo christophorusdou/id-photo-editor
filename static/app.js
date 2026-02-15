@@ -85,9 +85,9 @@ const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
     || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 const MEMORY_TIERS = {
-    high:   { processorSize: 1024, maxImageDim: 2048, label: "high" },
-    medium: { processorSize: 768,  maxImageDim: 1200, label: "medium" },
-    low:    { processorSize: 256,  maxImageDim: 1200, label: "low" },
+    high:   { processorSize: 1024, maxImageDim: 2048, dtype: "fp32", label: "high" },
+    medium: { processorSize: 768,  maxImageDim: 1200, dtype: "fp32", label: "medium" },
+    low:    { processorSize: 256,  maxImageDim: 800,  dtype: "q8",   label: "low" },
 };
 
 function getMemoryTier() {
@@ -1096,6 +1096,57 @@ async function oneClickGenerate() {
 }
 
 // ---------------------------------------------------------------------------
+// Server-side background removal (Cloudflare Pages Function fallback)
+// Used on iOS to avoid local model memory pressure entirely.
+// ---------------------------------------------------------------------------
+const SERVER_BG_REMOVAL_URL = "/api/remove-background";
+let serverBgAvailable = null; // null = unknown, true/false = cached result
+
+async function checkServerBgRemoval() {
+    if (serverBgAvailable !== null) return serverBgAvailable;
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+        const resp = await fetch(SERVER_BG_REMOVAL_URL, {
+            method: "POST",
+            signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        // A 400 means the endpoint exists but we didn't send an image — that's fine
+        serverBgAvailable = resp.status === 400 || resp.ok;
+    } catch {
+        serverBgAvailable = false;
+    }
+    console.log(`[server-bg] availability: ${serverBgAvailable}`);
+    return serverBgAvailable;
+}
+
+async function removeBackgroundServer(imageDataUrl) {
+    // Convert data URL to blob for upload
+    const resp = await fetch(imageDataUrl);
+    const imageBlob = await resp.blob();
+
+    const formData = new FormData();
+    formData.append("image", imageBlob, "photo.jpg");
+
+    const result = await fetch(SERVER_BG_REMOVAL_URL, {
+        method: "POST",
+        body: formData,
+    });
+
+    if (!result.ok) {
+        const detail = await result.text().catch(() => "");
+        throw new Error(`Server error (${result.status})${detail ? ": " + detail : ""}`);
+    }
+
+    const blob = await result.blob();
+    if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
+    lastBlobUrl = URL.createObjectURL(blob);
+    logMem("removeBackgroundServer done (blob URL)");
+    return lastBlobUrl;
+}
+
+// ---------------------------------------------------------------------------
 // Backend availability check
 // ---------------------------------------------------------------------------
 async function checkBackend() {
@@ -1148,7 +1199,7 @@ let mainThreadModel = null;
 let mainThreadProcessor = null;
 let mainThreadModelReady = false;
 
-async function loadMainThreadModel(processorSize) {
+async function loadMainThreadModel(processorSize, dtype) {
     if (mainThreadModel && mainThreadProcessor) {
         console.log("[main-thread] model already loaded");
         return;
@@ -1160,9 +1211,11 @@ async function loadMainThreadModel(processorSize) {
     env.allowLocalModels = false;
 
     const MODEL_ID = "briaai/RMBG-1.4";
+    const useDtype = dtype || "fp32";
 
-    console.log("[main-thread] loading model...");
+    console.log(`[main-thread] loading model (dtype=${useDtype})...`);
     mainThreadModel = await AutoModel.from_pretrained(MODEL_ID, {
+        dtype: useDtype,
         config: { model_type: "custom" },
         progress_callback: (p) => {
             if (p.status === "progress" && p.total) {
@@ -1190,7 +1243,7 @@ async function loadMainThreadModel(processorSize) {
     console.log("[main-thread] model ready");
 }
 
-async function runInferenceMainThread(imageDataUrl, processorSize) {
+async function runInferenceMainThread(imageDataUrl, processorSize, dtype) {
     const { RawImage } = await import(
         "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2"
     );
@@ -1198,7 +1251,7 @@ async function runInferenceMainThread(imageDataUrl, processorSize) {
     if (!mainThreadModelReady) {
         showStatus("Loading background removal model...", "info");
         showProgress(0);
-        await loadMainThreadModel(processorSize);
+        await loadMainThreadModel(processorSize, dtype);
     }
 
     showStatus("Removing background \u2014 the screen may freeze for 15\u201330s, this is normal...", "info");
@@ -1236,8 +1289,9 @@ async function runInferenceMainThread(imageDataUrl, processorSize) {
     mainThreadModelReady = false;
     logMem("[main-thread] model freed");
 
-    // Yield to event loop so GC can collect before mask application
-    await new Promise(r => setTimeout(r, 50));
+    // Yield to event loop so GC can collect before mask application.
+    // iOS needs much longer — Safari's GC is less aggressive under memory pressure.
+    await new Promise(r => setTimeout(r, isIOS ? 500 : 50));
 
     return resultData;
 }
@@ -1297,9 +1351,9 @@ async function preloadModel() {
     showProgress(0);
     try {
         if (useMainThread) {
-            await loadMainThreadModel(memoryTier.processorSize);
+            await loadMainThreadModel(memoryTier.processorSize, memoryTier.dtype);
         } else {
-            await sendWorkerMessage({ type: "load-model", processorSize: memoryTier.processorSize }, [], 120000);
+            await sendWorkerMessage({ type: "load-model", processorSize: memoryTier.processorSize, dtype: memoryTier.dtype }, [], 120000);
             modelReady = true;
         }
         dom.preloadButton.textContent = "Model Loaded";
@@ -1318,25 +1372,25 @@ async function preloadModel() {
 // ---------------------------------------------------------------------------
 const TIER_ORDER = [MEMORY_TIERS.high, MEMORY_TIERS.medium, MEMORY_TIERS.low];
 
-async function attemptInference(imageDataUrl, processorSize, useMainThread = false) {
+async function attemptInference(imageDataUrl, processorSize, useMainThread = false, dtype = "fp32") {
     let result;
     let sourceImg = null;
 
     if (useMainThread) {
         // Main-thread path for low-tier devices (iPhone)
-        console.log(`[bg-removal] using main-thread inference (processor=${processorSize}px)`);
-        result = await runInferenceMainThread(imageDataUrl, processorSize);
+        console.log(`[bg-removal] using main-thread inference (processor=${processorSize}px, dtype=${dtype})`);
+        result = await runInferenceMainThread(imageDataUrl, processorSize, dtype);
     } else {
         // Worker path for medium/high-tier devices
         if (!modelReady) {
             showStatus("Loading background removal model...", "info");
             showProgress(0);
-            await sendWorkerMessage({ type: "load-model", processorSize }, [], 120000);
+            await sendWorkerMessage({ type: "load-model", processorSize, dtype }, [], 120000);
             modelReady = true;
             dom.preloadButton.textContent = "Model Loaded";
             dom.preloadButton.disabled = true;
         } else {
-            await sendWorkerMessage({ type: "load-model", processorSize }, [], 120000);
+            await sendWorkerMessage({ type: "load-model", processorSize, dtype }, [], 120000);
         }
 
         showStatus("Removing background...", "info");
@@ -1415,9 +1469,23 @@ async function removeBackgroundBrowser(imageDataUrl) {
     // memory, so the catch/fallback never runs. Use main thread directly —
     // it has a much higher memory budget (~300-500MB vs ~100-150MB for Workers).
     if (isIOS) {
-        console.log(`[bg-removal] iOS detected — using main thread (processor=${memoryTier.processorSize}px)`);
+        console.log(`[bg-removal] iOS detected — using main thread (processor=${memoryTier.processorSize}px, dtype=${memoryTier.dtype})`);
+
+        // Try server-side first if available (zero local memory)
         try {
-            return await attemptInference(imageDataUrl, memoryTier.processorSize, true);
+            const serverAvail = await checkServerBgRemoval();
+            if (serverAvail) {
+                console.log("[bg-removal] using server-side fallback for iOS");
+                showStatus("Removing background (server)...", "info");
+                return await removeBackgroundServer(imageDataUrl);
+            }
+        } catch (e) {
+            console.warn("[bg-removal] server fallback failed, trying local:", e.message);
+        }
+
+        // Fall back to local quantized model
+        try {
+            return await attemptInference(imageDataUrl, memoryTier.processorSize, true, memoryTier.dtype);
         } catch (err) {
             console.warn("[bg-removal] main thread failed:", err.message);
             throw new Error(
@@ -1434,8 +1502,8 @@ async function removeBackgroundBrowser(imageDataUrl) {
     for (let i = 0; i < tiersToTry.length; i++) {
         const tier = tiersToTry[i];
         try {
-            console.log(`[bg-removal] attempting at ${tier.label} tier (processor=${tier.processorSize}px, worker)`);
-            const result = await attemptInference(imageDataUrl, tier.processorSize, false);
+            console.log(`[bg-removal] attempting at ${tier.label} tier (processor=${tier.processorSize}px, dtype=${tier.dtype}, worker)`);
+            const result = await attemptInference(imageDataUrl, tier.processorSize, false, tier.dtype);
             // Terminate Worker to reclaim WASM memory (~85MB) — WebAssembly.Memory
             // pages only grow, never shrink, so termination is the only way to free them
             destroyWorker();
@@ -1456,7 +1524,7 @@ async function removeBackgroundBrowser(imageDataUrl) {
             try {
                 console.log(`[bg-removal] falling back to main thread at ${tier.label} tier`);
                 showStatus("Retrying on main thread...", "info");
-                return await attemptInference(imageDataUrl, tier.processorSize, true);
+                return await attemptInference(imageDataUrl, tier.processorSize, true, tier.dtype);
             } catch (mainErr) {
                 console.warn(`[bg-removal] main thread failed at ${tier.label} tier:`, mainErr.message);
                 throw new Error(
