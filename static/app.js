@@ -81,6 +81,9 @@ let faceLandmarker = null;
 const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
     || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
 
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
 const MEMORY_TIERS = {
     high:   { processorSize: 1024, maxImageDim: 2048, label: "high" },
     medium: { processorSize: 768,  maxImageDim: 1200, label: "medium" },
@@ -89,9 +92,6 @@ const MEMORY_TIERS = {
 
 function getMemoryTier() {
     if (!isMobile) return MEMORY_TIERS.high;
-
-    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
-        || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
     if (isIOS) {
         const minDim = Math.min(screen.width, screen.height);
@@ -1286,7 +1286,7 @@ function sendWorkerMessage(msg, transferables, timeoutMs = 0) {
 }
 
 async function preloadModel() {
-    const useMainThread = memoryTier === MEMORY_TIERS.low;
+    const useMainThread = isIOS;
 
     if (useMainThread ? mainThreadModelReady : modelReady) {
         showStatus("Model already loaded.", "success");
@@ -1411,7 +1411,23 @@ async function attemptInference(imageDataUrl, processorSize, useMainThread = fal
 }
 
 async function removeBackgroundBrowser(imageDataUrl) {
-    // Build list of tiers to try, starting from current tier and stepping down
+    // iOS kills the entire tab (not just the Worker) when a Worker exceeds
+    // memory, so the catch/fallback never runs. Use main thread directly —
+    // it has a much higher memory budget (~300-500MB vs ~100-150MB for Workers).
+    if (isIOS) {
+        console.log(`[bg-removal] iOS detected — using main thread (processor=${memoryTier.processorSize}px)`);
+        try {
+            return await attemptInference(imageDataUrl, memoryTier.processorSize, true);
+        } catch (err) {
+            console.warn("[bg-removal] main thread failed:", err.message);
+            throw new Error(
+                "Background removal failed — your device may not have enough memory. " +
+                "Try unchecking \"Remove background\" and using the photo without BG removal."
+            );
+        }
+    }
+
+    // Non-iOS: worker with tier stepping, terminate after to reclaim WASM memory
     const startIdx = TIER_ORDER.indexOf(memoryTier);
     const tiersToTry = TIER_ORDER.slice(startIdx);
 
