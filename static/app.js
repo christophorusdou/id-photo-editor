@@ -1420,11 +1420,10 @@ async function removeBackgroundBrowser(imageDataUrl) {
         try {
             console.log(`[bg-removal] attempting at ${tier.label} tier (processor=${tier.processorSize}px, worker)`);
             const result = await attemptInference(imageDataUrl, tier.processorSize, false);
-            // On low-memory devices, terminate Worker to reclaim WASM memory
-            if (tier === MEMORY_TIERS.low) {
-                destroyWorker();
-                logMem("Worker terminated — WASM memory reclaimed");
-            }
+            // Terminate Worker to reclaim WASM memory (~85MB) — WebAssembly.Memory
+            // pages only grow, never shrink, so termination is the only way to free them
+            destroyWorker();
+            logMem("Worker terminated — WASM memory reclaimed");
             return result;
         } catch (err) {
             console.warn(`[bg-removal] worker failed at ${tier.label} tier:`, err.message);
