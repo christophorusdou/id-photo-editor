@@ -1,0 +1,23 @@
+# Cloudflare Pages configuration for id-photo-editor
+#
+# This file configures bindings for the server-side background removal
+# Pages Function (functions/api/remove-background.js).
+#
+# The function supports two backends (tried in order):
+#   1. Cloudflare Images (segment=foreground) — needs R2 bucket below
+#   2. remove.bg API — set REMOVE_BG_API_KEY in Pages dashboard env vars
+#
+# To deploy:
+#   npx wrangler pages deploy . --project-name id-photo-editor --branch main --commit-dirty=true
+
+name = "id-photo-editor"
+
+# R2 bucket for Cloudflare Images background removal.
+# Images are uploaded temporarily, transformed with segment=foreground,
+# then deleted. Free tier: 10GB storage, 10M reads/mo, 1M writes/mo.
+#
+# Create the bucket first:
+#   npx wrangler r2 bucket create id-photo-tmp
+[[r2_buckets]]
+binding = "IMAGES_BUCKET"
+bucket_name = "id-photo-tmp"

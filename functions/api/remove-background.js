@@ -5,10 +5,13 @@
 // user's device entirely. Critical for iPhone 12/13 where the ~176MB ONNX
 // model exceeds Safari's per-tab memory budget.
 //
+// Backends (tried in order):
+//   1. Cloudflare Images (segment=foreground) — needs IMAGES_BUCKET R2 binding
+//   2. remove.bg API — needs REMOVE_BG_API_KEY env var
+//
 // Setup:
-//   1. Enable Cloudflare Images on your zone (supports segment=foreground)
-//      OR bind Workers AI in your Pages project settings:
-//      wrangler.toml:  [ai]  binding = "AI"
+//   1. Create an R2 bucket and bind it as IMAGES_BUCKET in Pages settings,
+//      OR set REMOVE_BG_API_KEY as an environment variable.
 //
 //   2. Deploy: npx wrangler pages deploy . --project-name id-photo-editor
 //
@@ -19,7 +22,6 @@
 export async function onRequestPost(context) {
     const { request, env } = context;
 
-    // CORS headers for cross-origin requests
     const corsHeaders = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -39,39 +41,24 @@ export async function onRequestPost(context) {
 
         const imageBytes = new Uint8Array(await imageFile.arrayBuffer());
 
-        // Strategy 1: Use Workers AI binding if available
-        if (env.AI) {
-            try {
-                const result = await env.AI.run(
-                    "@cf/microsoft/resnet-50",  // placeholder — replace with segmentation model when available
-                    { image: [...imageBytes] }
-                );
-                // If a dedicated segmentation model is bound, return its output directly.
-                // For now, fall through to Strategy 2.
-            } catch (aiErr) {
-                console.log("Workers AI not available for segmentation:", aiErr.message);
-            }
-        }
-
-        // Strategy 2: Use Cloudflare Images transformation (segment=foreground)
-        // Requires: Cloudflare Images enabled on the zone
-        // This stores the image temporarily and applies the transformation.
+        // Strategy 1: Cloudflare Images transformation (segment=foreground)
+        // Requires: R2 bucket bound as IMAGES_BUCKET + Cloudflare Images enabled on zone
+        // Free tier: 5,000 unique transformations/month, R2 storage/ops free tier
         if (env.IMAGES_BUCKET) {
             const key = `tmp/${crypto.randomUUID()}.png`;
             try {
-                // Upload to R2
+                // Upload to R2 temporarily
                 await env.IMAGES_BUCKET.put(key, imageBytes, {
                     httpMetadata: { contentType: imageFile.type || "image/png" },
                 });
 
-                // Construct transformation URL
+                // Apply segment=foreground transformation
                 const host = new URL(request.url).origin;
                 const transformUrl = `${host}/cdn-cgi/image/segment=foreground,format=png/${host}/r2/${key}`;
 
                 const transformed = await fetch(transformUrl);
                 if (transformed.ok) {
                     const result = await transformed.arrayBuffer();
-                    // Clean up temp file
                     await env.IMAGES_BUCKET.delete(key);
                     return new Response(result, {
                         headers: {
@@ -81,7 +68,6 @@ export async function onRequestPost(context) {
                     });
                 }
 
-                // Clean up on failure
                 await env.IMAGES_BUCKET.delete(key);
             } catch (e) {
                 console.log("Cloudflare Images strategy failed:", e.message);
@@ -89,7 +75,9 @@ export async function onRequestPost(context) {
             }
         }
 
-        // Strategy 3: Proxy to external API (configure REMOVE_BG_API_KEY in Pages env vars)
+        // Strategy 2: Proxy to remove.bg API
+        // Requires: REMOVE_BG_API_KEY env var set in Pages settings
+        // Free tier: 50 preview-resolution images/month
         if (env.REMOVE_BG_API_KEY) {
             const apiResp = await fetch("https://api.remove.bg/v1.0/removebg", {
                 method: "POST",
@@ -110,10 +98,10 @@ export async function onRequestPost(context) {
             }
         }
 
-        // No strategy available
+        // No backend configured
         return new Response(
             "Server-side background removal not configured. " +
-            "Set up Cloudflare Images, Workers AI, or REMOVE_BG_API_KEY.",
+            "Set up Cloudflare Images (IMAGES_BUCKET R2 binding) or REMOVE_BG_API_KEY.",
             { status: 503, headers: corsHeaders }
         );
     } catch (err) {

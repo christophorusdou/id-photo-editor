@@ -9,7 +9,7 @@ Photo ID Generator — a static web application for uploading photos, cropping t
 - **Frontend:** Vanilla JavaScript (ES modules), HTML, CSS — no framework, no build step
 - **Image Cropping:** CropperJS v1.5.12 (loaded from CDN)
 - **Background Removal (browser):** Transformers.js (`@huggingface/transformers` v3) with `briaai/RMBG-1.4` ONNX model, runs via WebAssembly in-browser. Uses quantized int8 model (`model_quantized.onnx`, ~44MB) on iPhones to fit within Safari's memory limits; fp32 (`model.onnx`, 176MB) on desktop/iPad.
-- **Background Removal (server-side fallback):** Cloudflare Pages Function at `/api/remove-background` — auto-detected on iOS, supports Cloudflare Images, Workers AI, and remove.bg backends
+- **Background Removal (server-side fallback):** Cloudflare Pages Function at `/api/remove-background` — auto-detected on iOS, supports Cloudflare Images (`segment=foreground` via R2) and remove.bg backends
 - **Face Detection:** MediaPipe Face Landmarker (`@mediapipe/tasks-vision` v0.10.32), ~3MB model, runs on main thread
 - **Background Removal (optional local backend):** Python Flask server with Hugging Face `transformers` pipeline on GPU
 - **Image Processing:** Canvas API (browser), Pillow (backend)
@@ -29,6 +29,7 @@ Photo ID Generator — a static web application for uploading photos, cropping t
 ├── app.py                  # Optional Flask backend for GPU-accelerated inference
 ├── requirements.txt        # Python dependencies (for optional backend only)
 ├── RESEARCH-IMAGE-MODELS.md # Research on image editing models and upgrade paths
+├── wrangler.toml           # Cloudflare Pages config (R2 binding for server-side BG removal)
 ├── IPHONE-MEMORY-FIX.md   # Root cause analysis & solutions for iPhone Safari memory crash
 ├── plan.md                 # Implementation plan for one-click pipeline
 ├── README.md               # Setup, usage, and deployment guide
@@ -117,15 +118,14 @@ Runs RMBG-1.4 (`briaai/RMBG-1.4`) for background removal segmentation:
 
 Cloudflare Pages Function providing server-side background removal for iOS devices where local inference may exceed Safari's memory budget. Auto-detected by the frontend on page load.
 
-Supports three configurable backends (priority order):
+Supports two configurable backends (tried in order):
 
 | Backend | Env Var / Binding | Free Tier |
 |---|---|---|
 | Cloudflare Images (`segment=foreground`) | `IMAGES_BUCKET` (R2 binding) | 5,000 transformations/month |
-| Workers AI | `AI` (AI binding) | 10,000 neurons/day |
 | remove.bg API | `REMOVE_BG_API_KEY` (env var) | 50 preview-res/month |
 
-Configure bindings in `wrangler.toml` or the Cloudflare Pages dashboard.
+Configure bindings in `wrangler.toml` or the Cloudflare Pages dashboard. Cloudflare Images is recommended — it uses Cloudflare's own segmentation model (powered by Workers AI internally) and has a generous free tier. R2 is used only for temporary storage (upload, transform, delete).
 
 ### Optional Local Backend (`app.py`)
 

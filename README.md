@@ -56,13 +56,22 @@ See [`IPHONE-MEMORY-FIX.md`](IPHONE-MEMORY-FIX.md) for the full root cause analy
 
 When deployed on Cloudflare Pages, an optional Pages Function at `functions/api/remove-background.js` provides server-side background removal. The frontend auto-detects it on iOS and uses it transparently.
 
-Configure one of these backends via Cloudflare Pages environment variables / bindings:
+Configure a backend via Cloudflare Pages environment variables / bindings:
 
 | Backend | Config | Free Tier |
 |---|---|---|
-| Cloudflare Images | `IMAGES_BUCKET` R2 binding | 5,000/month |
-| Workers AI | `AI` binding | 10,000 neurons/day |
+| Cloudflare Images (recommended) | `IMAGES_BUCKET` R2 binding | 5,000 transformations/month |
 | remove.bg | `REMOVE_BG_API_KEY` env var | 50 previews/month |
+
+Cloudflare Images uses `segment=foreground` (powered by Workers AI internally). R2 is only used for temporary storage — images are uploaded, transformed, then deleted. Both R2 and Images transformations have generous free tiers.
+
+Setup for Cloudflare Images:
+```bash
+# Create R2 bucket (one-time)
+npx wrangler r2 bucket create id-photo-tmp
+# Deploy (wrangler.toml already has the binding configured)
+npx wrangler pages deploy . --project-name id-photo-editor --branch main --commit-dirty=true
+```
 
 ## Optional: GPU Backend
 

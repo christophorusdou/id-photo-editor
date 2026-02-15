@@ -85,14 +85,18 @@ On iOS, the client auto-detects whether `/api/remove-background` is available. I
 the image is uploaded to the server for processing — **zero local memory** for the ML
 model.
 
-The function supports three backends (configured via Cloudflare Pages environment
-variables):
+The function supports two backends (tried in order, configured via Cloudflare Pages
+environment variables / bindings):
 
 | Backend | Env Var | Cost |
 |---|---|---|
 | Cloudflare Images (`segment=foreground`) | `IMAGES_BUCKET` (R2 binding) | Free: 5,000/mo, then $0.50/1K |
-| Workers AI | `AI` (AI binding) | Free: 10K neurons/day |
 | remove.bg API | `REMOVE_BG_API_KEY` | Free: 50 previews/mo, paid: ~$0.20/image |
+
+Cloudflare Images is recommended — it uses Cloudflare's own segmentation model (powered
+by Workers AI internally, accessed via `segment=foreground` transformation URLs). R2 is
+used only for temporary storage (upload, transform, delete). There is no direct Workers AI
+API for background removal — it's only available through Cloudflare Images transformations.
 
 **Priority order in `app.js`:**
 1. Server-side (if available) — zero local memory

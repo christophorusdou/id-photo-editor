@@ -171,6 +171,7 @@ const dom = {
     browseButton: $("browse-button"),
     changePhoto: $("change-photo"),
     step1Next: $("step1-next"),
+    oneClickNotice: $("one-click-notice"),
     oneClickPanel: $("one-click-panel"),
     quickPresetSelect: $("quick-preset-select"),
     oneClickButton: $("one-click-button"),
@@ -251,6 +252,10 @@ function showStatus(message, type = "info") {
     dom.statusToast.className = "status-toast " + type;
     dom.statusText.textContent = message;
     dom.statusToast.classList.remove("hidden");
+    // On mobile, scroll status toast into view so user can see progress
+    if (isMobile) {
+        dom.statusToast.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
 }
 
 function hideStatus() {
@@ -320,6 +325,7 @@ function setupStep1() {
         dom.uploadPreview.classList.remove("hidden");
         dom.step1Next.disabled = false;
         dom.oneClickPanel.classList.remove("hidden");
+        if (dom.oneClickNotice.textContent) dom.oneClickNotice.classList.remove("hidden");
     }
 }
 
@@ -347,6 +353,7 @@ function handleFile(file) {
         dom.uploadPreview.classList.remove("hidden");
         dom.step1Next.disabled = false;
         dom.oneClickPanel.classList.remove("hidden");
+        if (dom.oneClickNotice.textContent) dom.oneClickNotice.classList.remove("hidden");
     };
     reader.readAsDataURL(file);
 }
@@ -980,6 +987,7 @@ async function oneClickGenerate() {
     state.isOneClickMode = true;
     const preset = PRESETS[parseInt(presetIndex)];
     dom.oneClickButton.disabled = true;
+    dom.appShell.classList.add("processing");
 
     try {
         // Step 1: Detect face
@@ -998,6 +1006,7 @@ async function oneClickGenerate() {
             showStatus("No face detected. Please use manual steps.", "error");
             state.isOneClickMode = false;
             dom.oneClickButton.disabled = false;
+            dom.appShell.classList.remove("processing");
             return;
         }
         state.faceData = faceData;
@@ -1021,6 +1030,7 @@ async function oneClickGenerate() {
                     showStatus("Backend not available. Switch to Browser mode in Settings.", "error");
                     state.isOneClickMode = false;
                     dom.oneClickButton.disabled = false;
+                    dom.appShell.classList.remove("processing");
                     return;
                 }
                 state.processedDataUrl = await removeBackgroundBackend(state.imageFile);
@@ -1092,6 +1102,7 @@ async function oneClickGenerate() {
         state.isOneClickMode = false;
     } finally {
         dom.oneClickButton.disabled = false;
+        dom.appShell.classList.remove("processing");
     }
 }
 
@@ -1916,4 +1927,17 @@ checkBackend();
 // Show "Remove background" opt-out checkbox on mobile only
 if (isMobile && dom.skipBgOption) {
     dom.skipBgOption.classList.remove("hidden");
+}
+
+// Show iPhone quality notice
+if (isIOS && dom.oneClickNotice) {
+    const isIPhone = /iPhone/.test(navigator.userAgent)
+        || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1
+            && Math.min(screen.width, screen.height) < 768);
+    if (isIPhone) {
+        dom.oneClickNotice.textContent =
+            "iPhone detected — using a smaller AI model to fit within Safari's memory limits. " +
+            "Background removal quality may be slightly reduced. " +
+            "For best results, use a desktop browser or iPad.";
+    }
 }
