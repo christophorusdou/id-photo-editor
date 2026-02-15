@@ -1391,6 +1391,8 @@ async function attemptInference(imageDataUrl, processorSize, useMainThread = fal
         imageData.data[i * 4 + 3] = maskData[i];
     }
     ctx.putImageData(imageData, 0, 0);
+    // Free decoded bitmap (~4.3MB for a 1200px image)
+    if (sourceImg) { sourceImg.src = ""; sourceImg = null; }
     logMem("removeBackground mask applied");
 
     const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
@@ -1410,20 +1412,33 @@ async function removeBackgroundBrowser(imageDataUrl) {
 
     for (let i = 0; i < tiersToTry.length; i++) {
         const tier = tiersToTry[i];
-        // Low tier (iPhone) uses main thread — worker memory ceiling is too low
-        const useMainThread = tier === MEMORY_TIERS.low;
         try {
-            console.log(`[bg-removal] attempting at ${tier.label} tier (processor=${tier.processorSize}px, mainThread=${useMainThread})`);
-            return await attemptInference(imageDataUrl, tier.processorSize, useMainThread);
+            console.log(`[bg-removal] attempting at ${tier.label} tier (processor=${tier.processorSize}px, worker)`);
+            const result = await attemptInference(imageDataUrl, tier.processorSize, false);
+            // On low-memory devices, terminate Worker to reclaim WASM memory
+            if (tier === MEMORY_TIERS.low) {
+                destroyWorker();
+                logMem("Worker terminated — WASM memory reclaimed");
+            }
+            return result;
         } catch (err) {
-            console.warn(`[bg-removal] failed at ${tier.label} tier:`, err.message);
-            if (!useMainThread) destroyWorker();
+            console.warn(`[bg-removal] worker failed at ${tier.label} tier:`, err.message);
+            destroyWorker();
 
             if (i < tiersToTry.length - 1) {
                 const nextTier = tiersToTry[i + 1];
                 showStatus(`Retrying at lower quality (${nextTier.processorSize}px)...`, "info");
                 console.log(`[bg-removal] retrying at ${nextTier.label} tier`);
-            } else {
+                continue;
+            }
+
+            // Last tier Worker failed — try main thread as final fallback
+            try {
+                console.log(`[bg-removal] falling back to main thread at ${tier.label} tier`);
+                showStatus("Retrying on main thread...", "info");
+                return await attemptInference(imageDataUrl, tier.processorSize, true);
+            } catch (mainErr) {
+                console.warn(`[bg-removal] main thread failed at ${tier.label} tier:`, mainErr.message);
                 throw new Error(
                     "Background removal failed — your device may not have enough memory. " +
                     "Try unchecking \"Remove background\" and using the photo without BG removal."
