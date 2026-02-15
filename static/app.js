@@ -87,7 +87,7 @@ const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
 const MEMORY_TIERS = {
     high:   { processorSize: 1024, maxImageDim: 2048, dtype: "fp32", label: "high" },
     medium: { processorSize: 768,  maxImageDim: 1200, dtype: "fp32", label: "medium" },
-    low:    { processorSize: 256,  maxImageDim: 800,  dtype: "q8",   label: "low" },
+    low:    { processorSize: 64,   maxImageDim: 512,  dtype: "q8",   label: "low" },
 };
 
 function getMemoryTier() {
