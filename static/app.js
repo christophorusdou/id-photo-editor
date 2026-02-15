@@ -848,8 +848,8 @@ function applyCropFromFaceData(faceData) {
     const cropHeight = headHeightCanvas / targetHeadRatio;
     const cropWidth = cropHeight * aspectRatio;
 
-    // Vertical positioning: ~18% margin above top of head
-    const headMarginTop = 0.18;
+    // Vertical positioning: ~14.5% margin above top of head (compliance range: 8%–15%)
+    const headMarginTop = 0.145;
     const cropTop = headTopCanvas - (cropHeight * headMarginTop);
     const cropLeft = faceCenterXCanvas - (cropWidth / 2);
 
