@@ -352,12 +352,19 @@ function handleFile(file) {
         dom.step1Next.disabled = false;
         dom.oneClickPanel.classList.remove("hidden");
 
-        // Show quality notice on low-memory devices (iPhones)
+        // Show quality notice on low-memory devices
         if (memoryTier.label === "low" && dom.oneClickNotice) {
-            dom.oneClickNotice.textContent =
-                "Low-memory device detected \u2014 using a smaller AI model to fit within Safari\u2019s memory limits. " +
-                "Background removal quality may be slightly reduced. " +
-                "For best results, use a desktop browser or iPad.";
+            const crashed = localStorage.getItem("bg_removal_crashed");
+            if (crashed) {
+                dom.oneClickNotice.textContent =
+                    "Background removal crashed on your last attempt. " +
+                    "iPhones don\u2019t have enough memory for AI background removal. " +
+                    "Uncheck \u201cRemove background\u201d below, or use a desktop browser or iPad for best results.";
+            } else {
+                dom.oneClickNotice.textContent =
+                    "Low-memory device detected \u2014 background removal may not work on this device. " +
+                    "For best results, use a desktop browser or iPad.";
+            }
             dom.oneClickNotice.classList.remove("hidden");
         }
     };
@@ -1434,6 +1441,11 @@ async function removeBackgroundBrowser(imageDataUrl) {
     // WASM memory (~50-80MB). Main-thread WASM memory can never be freed (pages only
     // grow), which causes OOM on the export step. With q8 model (~44MB), inference
     // fits within Worker's ~100-150MB budget even on iOS.
+
+    // Set crash flag — if the tab dies mid-inference, this persists and we
+    // show a warning on next page load
+    try { localStorage.setItem("bg_removal_crashed", "1"); } catch {}
+
     const startIdx = TIER_ORDER.indexOf(memoryTier);
     const tiersToTry = TIER_ORDER.slice(startIdx);
 
@@ -1446,6 +1458,8 @@ async function removeBackgroundBrowser(imageDataUrl) {
             // pages only grow, never shrink, so termination is the only way to free them
             destroyWorker();
             logMem("Worker terminated — WASM memory reclaimed");
+            // Clear crash flag — inference succeeded
+            try { localStorage.removeItem("bg_removal_crashed"); } catch {}
             return result;
         } catch (err) {
             console.warn(`[bg-removal] worker failed at ${tier.label} tier:`, err.message);
@@ -1462,9 +1476,12 @@ async function removeBackgroundBrowser(imageDataUrl) {
             try {
                 console.log(`[bg-removal] falling back to main thread at ${tier.label} tier`);
                 showStatus("Retrying on main thread...", "info");
-                return await attemptInference(imageDataUrl, tier.processorSize, true, tier.dtype);
+                const result = await attemptInference(imageDataUrl, tier.processorSize, true, tier.dtype);
+                try { localStorage.removeItem("bg_removal_crashed"); } catch {}
+                return result;
             } catch (mainErr) {
                 console.warn(`[bg-removal] main thread failed at ${tier.label} tier:`, mainErr.message);
+                try { localStorage.removeItem("bg_removal_crashed"); } catch {}
                 throw new Error(
                     "Background removal failed — your device may not have enough memory. " +
                     "Try unchecking \"Remove background\" and using the photo without BG removal."
@@ -1855,3 +1872,11 @@ checkBackend();
 if (isMobile && dom.skipBgOption) {
     dom.skipBgOption.classList.remove("hidden");
 }
+
+// If a previous BG removal attempt crashed (tab killed by OS), uncheck
+// "Remove background" by default so the user isn't stuck in a crash loop
+try {
+    if (localStorage.getItem("bg_removal_crashed") && dom.skipBgCheckbox) {
+        dom.skipBgCheckbox.checked = false;
+    }
+} catch {}
