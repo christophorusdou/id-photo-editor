@@ -8,7 +8,7 @@ Photo ID Generator — a static web application for uploading photos, cropping t
 
 - **Frontend:** Vanilla JavaScript (ES modules), HTML, CSS — no framework, no build step
 - **Image Cropping:** CropperJS v1.5.12 (loaded from CDN)
-- **Background Removal (browser):** Transformers.js (`@huggingface/transformers` v3) with `briaai/RMBG-1.4` ONNX model, runs via WebAssembly in-browser
+- **Background Removal (browser):** Transformers.js (`@huggingface/transformers` v3) with `briaai/RMBG-1.4` ONNX model, runs via WebAssembly in-browser. Uses quantized int8 model (`model_quantized.onnx`, ~44MB) on iPhones to fit within Safari's memory limits; fp32 (`model.onnx`, 176MB) on desktop/iPad.
 - **Face Detection:** MediaPipe Face Landmarker (`@mediapipe/tasks-vision` v0.10.32), ~3MB model, runs on main thread
 - **Background Removal (optional backend):** Python Flask server with Hugging Face `transformers` pipeline on GPU
 - **Image Processing:** Canvas API (browser), Pillow (backend)
@@ -25,6 +25,7 @@ Photo ID Generator — a static web application for uploading photos, cropping t
 ├── app.py                  # Optional Flask backend for GPU-accelerated inference
 ├── requirements.txt        # Python dependencies (for optional backend only)
 ├── RESEARCH-IMAGE-MODELS.md # Research on image editing models and upgrade paths
+├── IPHONE-MEMORY-FIX.md   # Root cause analysis & solutions for iPhone Safari memory crash
 ├── plan.md                 # Implementation plan for one-click pipeline
 ├── README.md               # Setup, usage, and deployment guide
 ├── LICENSE                 # GPLv3
@@ -42,7 +43,8 @@ python3 -m http.server 8000
 # or: npx serve .
 ```
 
-Background removal runs in-browser via Transformers.js/ONNX (RMBG-1.4 model, ~45MB, downloaded on first use).
+Background removal runs in-browser via Transformers.js/ONNX (RMBG-1.4 model, ~44MB quantized / 176MB fp32, downloaded on first use).
+On iPhones, the quantized int8 model is used automatically to fit within Safari's memory limits.
 Face detection runs via MediaPipe (~3MB model, lazy-loaded on first use).
 
 ### With optional backend (GPU-accelerated)
@@ -82,6 +84,7 @@ ES module with dynamic imports from CDN. Key features:
 - **Face detection** — MediaPipe Face Landmarker (478 landmarks), lazy-loaded via dynamic `import()`, runs on main thread (~50ms per image)
 - **Auto face centering** — computes crop rectangle from face landmarks to center face at ~60% frame height with ~12% top margin
 - **Compliance checking** — per-preset rules validate head height ratio, eye position, horizontal centering, head tilt, face-in-frame, and top margin
+- **iPhone memory optimizations** — quantized int8 model (~44MB vs 176MB fp32), reduced max image dimensions (800px), aggressive GC yields (500ms on iOS), MediaPipe freed before BG removal (see `IPHONE-MEMORY-FIX.md`)
 - **Dual inference modes** — browser (Transformers.js/ONNX) or backend (Flask API), selectable via radio buttons
 - **Backend auto-detection** — probes `/remove_background` on load, shows availability status
 - **Model loading with progress** — progress bar during ONNX model download
@@ -100,10 +103,11 @@ ES module with dynamic imports from CDN. Key features:
 ### Web Worker (`static/worker.js`)
 
 Runs RMBG-1.4 (`briaai/RMBG-1.4`) for background removal segmentation:
-- Model loaded via `AutoModel.from_pretrained` with `dtype: "fp32"`
+- Model loaded via `AutoModel.from_pretrained` with configurable `dtype` (`"q8"` on iPhone, `"fp32"` elsewhere)
 - Processor auto-configured via `AutoProcessor.from_pretrained`
 - Inference: input → pixel_values → model output → `.mul(255)` → resize mask to original dimensions
 - Message protocol: `load-model` / `inference` → `model-ready` / `result` / `error` / `progress`
+- `load-model` accepts optional `dtype` parameter for memory-tier-aware quantization
 
 ### Optional Backend (`app.py`)
 
@@ -157,7 +161,7 @@ Plain CSS with design tokens (CSS custom properties). Color scheme: `#2563eb` (p
 | Arrow key step | 10px | `static/app.js` CONFIG |
 | Base zoom factor | 0.02 | `static/app.js` CONFIG |
 | Max zoom factor | 0.1 | `static/app.js` CONFIG |
-| BG removal model | briaai/RMBG-1.4 | `static/worker.js` |
+| BG removal model | briaai/RMBG-1.4 (q8 on iPhone, fp32 elsewhere) | `static/worker.js`, `static/app.js` |
 | Face detection model | MediaPipe Face Landmarker float16 | `static/app.js` CONFIG |
 | MediaPipe version | @mediapipe/tasks-vision@0.10.32 | `static/app.js` CONFIG |
 

@@ -12,6 +12,7 @@ const MODEL_ID = "briaai/RMBG-1.4";
 let model = null;
 let processor = null;
 let currentProcessorSize = 1024;
+let currentDtype = null;
 
 function makeProcessorConfig(size) {
     return {
@@ -29,17 +30,22 @@ function makeProcessorConfig(size) {
 
 async function loadModel(data) {
     const requestedSize = (data && data.processorSize) || 1024;
+    const requestedDtype = (data && data.dtype) || "fp32";
 
-    // If model and processor exist and size matches, skip
-    if (model && processor && currentProcessorSize === requestedSize) {
+    // If model and processor exist and size + dtype match, skip
+    if (model && processor && currentProcessorSize === requestedSize && currentDtype === requestedDtype) {
         self.postMessage({ type: "model-ready" });
         return;
     }
 
     try {
-        // Load model only once (expensive — downloads ~45MB ONNX weights)
-        if (!model) {
+        // Reload model if dtype changed or not loaded yet
+        if (!model || currentDtype !== requestedDtype) {
+            if (model && model.dispose) model.dispose();
+            model = null;
+            console.log(`[worker] loading model (dtype=${requestedDtype})...`);
             model = await AutoModel.from_pretrained(MODEL_ID, {
+                dtype: requestedDtype,
                 config: { model_type: "custom" },
                 progress_callback: (p) => {
                     if (p.status === "progress" && p.total) {
@@ -50,6 +56,7 @@ async function loadModel(data) {
                     }
                 },
             });
+            currentDtype = requestedDtype;
         }
 
         // Create/recreate processor at requested size (cheap)
