@@ -85,9 +85,9 @@ const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
     || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 const MEMORY_TIERS = {
-    high:   { processorSize: 1024, maxImageDim: 2048, label: "high" },
-    medium: { processorSize: 768,  maxImageDim: 1200, label: "medium" },
-    low:    { processorSize: 256,  maxImageDim: 1200, label: "low" },
+    high:   { processorSize: 1024, maxImageDim: 2048, dtype: "fp32", label: "high" },
+    medium: { processorSize: 768,  maxImageDim: 1200, dtype: "fp32", label: "medium" },
+    low:    { processorSize: 256,  maxImageDim: 800,  dtype: "q8",   label: "low" },
 };
 
 function getMemoryTier() {
@@ -109,7 +109,7 @@ function getMemoryTier() {
 }
 
 const memoryTier = getMemoryTier();
-console.log(`[tier] ${memoryTier.label}: processor=${memoryTier.processorSize}px, maxImage=${memoryTier.maxImageDim}px`);
+console.log(`[tier] ${memoryTier.label}: processor=${memoryTier.processorSize}px, maxImage=${memoryTier.maxImageDim}px, dtype=${memoryTier.dtype}`);
 
 function logMem(label) {
     if (!isMobile) return;
@@ -172,6 +172,7 @@ const dom = {
     changePhoto: $("change-photo"),
     step1Next: $("step1-next"),
     oneClickPanel: $("one-click-panel"),
+    oneClickNotice: $("one-click-notice"),
     quickPresetSelect: $("quick-preset-select"),
     oneClickButton: $("one-click-button"),
     skipBgOption: $("skip-bg-option"),
@@ -251,6 +252,9 @@ function showStatus(message, type = "info") {
     dom.statusToast.className = "status-toast " + type;
     dom.statusText.textContent = message;
     dom.statusToast.classList.remove("hidden");
+    if (isMobile) {
+        dom.statusToast.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
 }
 
 function hideStatus() {
@@ -347,6 +351,15 @@ function handleFile(file) {
         dom.uploadPreview.classList.remove("hidden");
         dom.step1Next.disabled = false;
         dom.oneClickPanel.classList.remove("hidden");
+
+        // Show quality notice on low-memory devices (iPhones)
+        if (memoryTier.label === "low" && dom.oneClickNotice) {
+            dom.oneClickNotice.textContent =
+                "Low-memory device detected \u2014 using a smaller AI model to fit within Safari\u2019s memory limits. " +
+                "Background removal quality may be slightly reduced. " +
+                "For best results, use a desktop browser or iPad.";
+            dom.oneClickNotice.classList.remove("hidden");
+        }
     };
     reader.readAsDataURL(file);
 }
@@ -980,6 +993,7 @@ async function oneClickGenerate() {
     state.isOneClickMode = true;
     const preset = PRESETS[parseInt(presetIndex)];
     dom.oneClickButton.disabled = true;
+    dom.appShell.classList.add("processing");
 
     try {
         // Step 1: Detect face
@@ -998,6 +1012,7 @@ async function oneClickGenerate() {
             showStatus("No face detected. Please use manual steps.", "error");
             state.isOneClickMode = false;
             dom.oneClickButton.disabled = false;
+            dom.appShell.classList.remove("processing");
             return;
         }
         state.faceData = faceData;
@@ -1021,6 +1036,7 @@ async function oneClickGenerate() {
                     showStatus("Backend not available. Switch to Browser mode in Settings.", "error");
                     state.isOneClickMode = false;
                     dom.oneClickButton.disabled = false;
+                    dom.appShell.classList.remove("processing");
                     return;
                 }
                 state.processedDataUrl = await removeBackgroundBackend(state.imageFile);
@@ -1092,6 +1108,7 @@ async function oneClickGenerate() {
         state.isOneClickMode = false;
     } finally {
         dom.oneClickButton.disabled = false;
+        dom.appShell.classList.remove("processing");
     }
 }
 
@@ -1125,7 +1142,7 @@ async function checkBackend() {
 // ---------------------------------------------------------------------------
 function getWorker() {
     if (!worker) {
-        worker = new Worker("static/worker.js?v=4", { type: "module" });
+        worker = new Worker("static/worker.js?v=5", { type: "module" });
     }
     return worker;
 }
@@ -1148,7 +1165,7 @@ let mainThreadModel = null;
 let mainThreadProcessor = null;
 let mainThreadModelReady = false;
 
-async function loadMainThreadModel(processorSize) {
+async function loadMainThreadModel(processorSize, dtype = "fp32") {
     if (mainThreadModel && mainThreadProcessor) {
         console.log("[main-thread] model already loaded");
         return;
@@ -1161,8 +1178,9 @@ async function loadMainThreadModel(processorSize) {
 
     const MODEL_ID = "briaai/RMBG-1.4";
 
-    console.log("[main-thread] loading model...");
+    console.log(`[main-thread] loading model (dtype=${dtype})...`);
     mainThreadModel = await AutoModel.from_pretrained(MODEL_ID, {
+        dtype,
         config: { model_type: "custom" },
         progress_callback: (p) => {
             if (p.status === "progress" && p.total) {
@@ -1190,7 +1208,7 @@ async function loadMainThreadModel(processorSize) {
     console.log("[main-thread] model ready");
 }
 
-async function runInferenceMainThread(imageDataUrl, processorSize) {
+async function runInferenceMainThread(imageDataUrl, processorSize, dtype = "fp32") {
     const { RawImage } = await import(
         "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2"
     );
@@ -1198,7 +1216,7 @@ async function runInferenceMainThread(imageDataUrl, processorSize) {
     if (!mainThreadModelReady) {
         showStatus("Loading background removal model...", "info");
         showProgress(0);
-        await loadMainThreadModel(processorSize);
+        await loadMainThreadModel(processorSize, dtype);
     }
 
     showStatus("Removing background \u2014 the screen may freeze for 15\u201330s, this is normal...", "info");
@@ -1237,7 +1255,8 @@ async function runInferenceMainThread(imageDataUrl, processorSize) {
     logMem("[main-thread] model freed");
 
     // Yield to event loop so GC can collect before mask application
-    await new Promise(r => setTimeout(r, 50));
+    // iOS Safari needs longer under memory pressure
+    await new Promise(r => setTimeout(r, isIOS ? 500 : 50));
 
     return resultData;
 }
@@ -1297,9 +1316,9 @@ async function preloadModel() {
     showProgress(0);
     try {
         if (useMainThread) {
-            await loadMainThreadModel(memoryTier.processorSize);
+            await loadMainThreadModel(memoryTier.processorSize, memoryTier.dtype);
         } else {
-            await sendWorkerMessage({ type: "load-model", processorSize: memoryTier.processorSize }, [], 120000);
+            await sendWorkerMessage({ type: "load-model", processorSize: memoryTier.processorSize, dtype: memoryTier.dtype }, [], 120000);
             modelReady = true;
         }
         dom.preloadButton.textContent = "Model Loaded";
@@ -1318,25 +1337,25 @@ async function preloadModel() {
 // ---------------------------------------------------------------------------
 const TIER_ORDER = [MEMORY_TIERS.high, MEMORY_TIERS.medium, MEMORY_TIERS.low];
 
-async function attemptInference(imageDataUrl, processorSize, useMainThread = false) {
+async function attemptInference(imageDataUrl, processorSize, useMainThread = false, dtype = "fp32") {
     let result;
     let sourceImg = null;
 
     if (useMainThread) {
         // Main-thread path for low-tier devices (iPhone)
-        console.log(`[bg-removal] using main-thread inference (processor=${processorSize}px)`);
-        result = await runInferenceMainThread(imageDataUrl, processorSize);
+        console.log(`[bg-removal] using main-thread inference (processor=${processorSize}px, dtype=${dtype})`);
+        result = await runInferenceMainThread(imageDataUrl, processorSize, dtype);
     } else {
         // Worker path for medium/high-tier devices
         if (!modelReady) {
             showStatus("Loading background removal model...", "info");
             showProgress(0);
-            await sendWorkerMessage({ type: "load-model", processorSize }, [], 120000);
+            await sendWorkerMessage({ type: "load-model", processorSize, dtype }, [], 120000);
             modelReady = true;
             dom.preloadButton.textContent = "Model Loaded";
             dom.preloadButton.disabled = true;
         } else {
-            await sendWorkerMessage({ type: "load-model", processorSize }, [], 120000);
+            await sendWorkerMessage({ type: "load-model", processorSize, dtype }, [], 120000);
         }
 
         showStatus("Removing background...", "info");
@@ -1415,9 +1434,9 @@ async function removeBackgroundBrowser(imageDataUrl) {
     // memory, so the catch/fallback never runs. Use main thread directly —
     // it has a much higher memory budget (~300-500MB vs ~100-150MB for Workers).
     if (isIOS) {
-        console.log(`[bg-removal] iOS detected — using main thread (processor=${memoryTier.processorSize}px)`);
+        console.log(`[bg-removal] iOS detected — using main thread (processor=${memoryTier.processorSize}px, dtype=${memoryTier.dtype})`);
         try {
-            return await attemptInference(imageDataUrl, memoryTier.processorSize, true);
+            return await attemptInference(imageDataUrl, memoryTier.processorSize, true, memoryTier.dtype);
         } catch (err) {
             console.warn("[bg-removal] main thread failed:", err.message);
             throw new Error(
@@ -1434,8 +1453,8 @@ async function removeBackgroundBrowser(imageDataUrl) {
     for (let i = 0; i < tiersToTry.length; i++) {
         const tier = tiersToTry[i];
         try {
-            console.log(`[bg-removal] attempting at ${tier.label} tier (processor=${tier.processorSize}px, worker)`);
-            const result = await attemptInference(imageDataUrl, tier.processorSize, false);
+            console.log(`[bg-removal] attempting at ${tier.label} tier (processor=${tier.processorSize}px, dtype=${tier.dtype}, worker)`);
+            const result = await attemptInference(imageDataUrl, tier.processorSize, false, tier.dtype);
             // Terminate Worker to reclaim WASM memory (~85MB) — WebAssembly.Memory
             // pages only grow, never shrink, so termination is the only way to free them
             destroyWorker();
@@ -1456,7 +1475,7 @@ async function removeBackgroundBrowser(imageDataUrl) {
             try {
                 console.log(`[bg-removal] falling back to main thread at ${tier.label} tier`);
                 showStatus("Retrying on main thread...", "info");
-                return await attemptInference(imageDataUrl, tier.processorSize, true);
+                return await attemptInference(imageDataUrl, tier.processorSize, true, tier.dtype);
             } catch (mainErr) {
                 console.warn(`[bg-removal] main thread failed at ${tier.label} tier:`, mainErr.message);
                 throw new Error(
