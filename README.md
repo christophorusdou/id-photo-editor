@@ -11,6 +11,7 @@ A free, private web app for generating passport and ID photos. One-click pipelin
 - **Compliance checking** — validates head height, eye position, centering, tilt, and margins against official requirements
 - **Print-ready exports** — download a single cropped photo or a 4x6 sheet with multiple tiled copies at 300 DPI
 - **100% client-side** — no server required, your photos never leave your device
+- **iPhone optimized** — quantized int8 model (~44MB vs 176MB) with automatic server-side fallback on Cloudflare Pages
 - **Manual mode** — full step-by-step wizard (Upload → Background → Adjust → Crop → Export) for fine-grained control
 - Optional GPU-accelerated backend for faster inference
 
@@ -24,7 +25,7 @@ python3 -m http.server 8000
 
 Then visit `http://localhost:8000`.
 
-The ~45MB background removal model downloads automatically on first use and is cached by the browser.
+The background removal model downloads automatically on first use and is cached by the browser (~44MB quantized on iPhone, ~176MB full precision on desktop).
 
 ## Deployment
 
@@ -37,6 +38,40 @@ npx wrangler pages deploy . --project-name id-photo-editor --branch main --commi
 ```
 
 The Cloudflare Pages project name is `id-photo-editor`, with custom domain `id-photo-editor.cdrift.com` configured via the Cloudflare dashboard.
+
+## Mobile / iPhone Compatibility
+
+The app runs on iPhones but Safari has strict per-tab memory limits (~300–500MB on 4GB devices like iPhone 12/13). Several optimizations keep inference within budget:
+
+- **Quantized model (int8):** ~44MB instead of 176MB fp32 — 75% smaller weights, 40% lower peak memory
+- **Reduced image dimensions:** 800px max on iPhone (vs 1200px on desktop)
+- **Main-thread inference:** bypasses Web Worker's lower memory ceiling on iOS
+- **Aggressive cleanup:** model unloaded after inference, canvases zeroed, GC yields
+
+If deployed on Cloudflare Pages, the app auto-detects a server-side fallback at `/api/remove-background` — sending the image to the server for processing with zero local ML memory.
+
+See [`IPHONE-MEMORY-FIX.md`](IPHONE-MEMORY-FIX.md) for the full root cause analysis and memory budget breakdown.
+
+## Server-Side Fallback (Cloudflare Pages)
+
+When deployed on Cloudflare Pages, an optional Pages Function at `functions/api/remove-background.js` provides server-side background removal. The frontend auto-detects it on iOS and uses it transparently.
+
+Configure a backend via Cloudflare Pages environment variables / bindings:
+
+| Backend | Config | Free Tier |
+|---|---|---|
+| Cloudflare Images (recommended) | `IMAGES_BUCKET` R2 binding | 5,000 transformations/month |
+| remove.bg | `REMOVE_BG_API_KEY` env var | 50 previews/month |
+
+Cloudflare Images uses `segment=foreground` (powered by Workers AI internally). R2 is only used for temporary storage — images are uploaded, transformed, then deleted. Both R2 and Images transformations have generous free tiers.
+
+Setup for Cloudflare Images:
+```bash
+# Create R2 bucket (one-time)
+npx wrangler r2 bucket create id-photo-tmp
+# Deploy (wrangler.toml already has the binding configured)
+npx wrangler pages deploy . --project-name id-photo-editor --branch main --commit-dirty=true
+```
 
 ## Optional: GPU Backend
 
