@@ -1305,7 +1305,7 @@ function sendWorkerMessage(msg, transferables, timeoutMs = 0) {
 }
 
 async function preloadModel() {
-    const useMainThread = isIOS || memoryTier.label === "low";
+    const useMainThread = false; // Always use Worker — it's terminated after inference to free WASM
 
     if (useMainThread ? mainThreadModelReady : modelReady) {
         showStatus("Model already loaded.", "success");
@@ -1430,24 +1430,10 @@ async function attemptInference(imageDataUrl, processorSize, useMainThread = fal
 }
 
 async function removeBackgroundBrowser(imageDataUrl) {
-    // Low-tier devices (iPhones, low-RAM Android) use main thread directly:
-    // - iOS kills the entire tab when a Worker exceeds memory (no catch possible)
-    // - Low-RAM devices benefit from avoiding Worker overhead (~25MB WASM runtime)
-    // Main thread has a larger memory budget (~300-500MB vs ~100-150MB for Workers).
-    if (isIOS || memoryTier.label === "low") {
-        console.log(`[bg-removal] low-tier/iOS — using main thread (processor=${memoryTier.processorSize}px, dtype=${memoryTier.dtype})`);
-        try {
-            return await attemptInference(imageDataUrl, memoryTier.processorSize, true, memoryTier.dtype);
-        } catch (err) {
-            console.warn("[bg-removal] main thread failed:", err.message);
-            throw new Error(
-                "Background removal failed — your device may not have enough memory. " +
-                "Try unchecking \"Remove background\" and using the photo without BG removal."
-            );
-        }
-    }
-
-    // Non-iOS: worker with tier stepping, terminate after to reclaim WASM memory
+    // All devices use Worker path: Worker is terminated after inference to reclaim
+    // WASM memory (~50-80MB). Main-thread WASM memory can never be freed (pages only
+    // grow), which causes OOM on the export step. With q8 model (~44MB), inference
+    // fits within Worker's ~100-150MB budget even on iOS.
     const startIdx = TIER_ORDER.indexOf(memoryTier);
     const tiersToTry = TIER_ORDER.slice(startIdx);
 
