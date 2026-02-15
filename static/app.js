@@ -84,7 +84,7 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 const MEMORY_TIERS = {
     high:   { processorSize: 1024, maxImageDim: 2048, label: "high" },
     medium: { processorSize: 768,  maxImageDim: 1200, label: "medium" },
-    low:    { processorSize: 256,  maxImageDim: 1200, label: "low" },
+    low:    { processorSize: 256,  maxImageDim: 1024, label: "low" },
 };
 
 function getMemoryTier() {
@@ -109,6 +109,7 @@ function getMemoryTier() {
 }
 
 const memoryTier = getMemoryTier();
+const isLowMemDevice = memoryTier === MEMORY_TIERS.low;
 console.log(`[tier] ${memoryTier.label}: processor=${memoryTier.processorSize}px, maxImage=${memoryTier.maxImageDim}px`);
 
 function logMem(label) {
@@ -125,12 +126,46 @@ function logMem(label) {
 // ---------------------------------------------------------------------------
 // Image Resize Helper (prevents mobile OOM crashes with 12MP+ photos)
 // ---------------------------------------------------------------------------
+
+// Convert a canvas to a blob URL (avoids data URL base64 overhead — saves ~33%)
+function canvasToBlobUrl(canvas, type = "image/jpeg", quality = 0.92) {
+    return new Promise((resolve) => {
+        canvas.toBlob((blob) => {
+            // Zero the canvas immediately to free its backing store
+            canvas.width = 0;
+            canvas.height = 0;
+            resolve(URL.createObjectURL(blob));
+        }, type, quality);
+    });
+}
+
+// Revoke a blob URL safely (no-op for data URLs or null)
+function revokeBlobUrl(url) {
+    if (url && url.startsWith("blob:")) {
+        URL.revokeObjectURL(url);
+    }
+}
+
+// Convert a data URL to a blob URL without re-encoding (preserves original quality)
+function dataUrlToBlobUrl(dataUrl) {
+    return fetch(dataUrl)
+        .then(r => r.blob())
+        .then(blob => URL.createObjectURL(blob));
+}
+
 function resizeImageIfNeeded(dataUrl, maxDim) {
     return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
             if (img.width <= maxDim && img.height <= maxDim) {
-                resolve(dataUrl);
+                if (isLowMemDevice) {
+                    // Low-mem: convert to blob URL to avoid keeping the large data URL
+                    // Uses fetch to decode data URL → blob directly (no re-encoding, no quality loss)
+                    dataUrlToBlobUrl(dataUrl).then(resolve);
+                } else {
+                    // Desktop/iPad/Android: return data URL as-is
+                    resolve(dataUrl);
+                }
                 return;
             }
             const scale = maxDim / Math.max(img.width, img.height);
@@ -140,7 +175,12 @@ function resizeImageIfNeeded(dataUrl, maxDim) {
             canvas.width = w;
             canvas.height = h;
             canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL("image/jpeg", 0.92));
+            if (isLowMemDevice) {
+                // Low-mem: use blob URL to save ~33% base64 overhead
+                canvasToBlobUrl(canvas).then(resolve);
+            } else {
+                resolve(canvas.toDataURL("image/jpeg", 0.92));
+            }
         };
         img.src = dataUrl;
     });
@@ -265,6 +305,7 @@ function showProgress(percent) {
 function goToStep(n) {
     if (n < 1 || n > 5) return;
 
+    const prevStep = state.currentStep;
     state.currentStep = n;
 
     document.querySelectorAll(".wizard-step").forEach((el) => {
@@ -272,6 +313,17 @@ function goToStep(n) {
     });
     const target = document.querySelector(`.wizard-step[data-step="${n}"]`);
     if (target) target.classList.add("active");
+
+    // Low-mem: clear DOM image sources from steps we're leaving to free decoded bitmaps
+    if (isLowMemDevice) {
+        if (prevStep === 1 && n !== 1) {
+            dom.previewImage.src = "";
+        }
+        if (prevStep === 2 && n !== 2) {
+            dom.baBefore.src = "";
+            dom.baAfter.src = "";
+        }
+    }
 
     updateProgressIndicator();
     setupStep(n);
@@ -327,6 +379,10 @@ function handleFile(file) {
     reader.onload = async () => {
         const maxDim = memoryTier.maxImageDim;
         logMem(`handleFile start (maxDim=${maxDim}, rawLen=${(reader.result.length / 1024 / 1024).toFixed(1)}MB)`);
+        // Revoke previous blob URLs before overwriting
+        revokeBlobUrl(state.imageDataUrl);
+        revokeBlobUrl(state.processedDataUrl);
+        revokeBlobUrl(state.adjustedDataUrl);
         state.imageDataUrl = await resizeImageIfNeeded(reader.result, maxDim);
         logMem("handleFile resized");
         // Reset downstream state
@@ -511,7 +567,7 @@ function bakeAdjustments() {
 
     return new Promise((resolve) => {
         const img = new Image();
-        img.onload = () => {
+        img.onload = async () => {
             const canvas = document.createElement("canvas");
             canvas.width = img.width;
             canvas.height = img.height;
@@ -525,7 +581,13 @@ function bakeAdjustments() {
                 applyAdjustmentsPixel(ctx, canvas.width, canvas.height);
             }
 
-            state.adjustedDataUrl = canvas.toDataURL("image/png");
+            if (isLowMemDevice) {
+                // Low-mem: use blob URL to save ~33% memory
+                revokeBlobUrl(state.adjustedDataUrl);
+                state.adjustedDataUrl = await canvasToBlobUrl(canvas, "image/png");
+            } else {
+                state.adjustedDataUrl = canvas.toDataURL("image/png");
+            }
             resolve();
         };
         img.onerror = resolve;
@@ -720,6 +782,12 @@ function setupStep5() {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
     ctx.drawImage(croppedCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
+
+    // Low-mem: free the full-resolution cropped canvas (only the small preview is needed)
+    if (isLowMemDevice) {
+        croppedCanvas.width = 0;
+        croppedCanvas.height = 0;
+    }
 
     // Show compliance panel if we have results
     if (state.complianceResult) {
@@ -1004,6 +1072,10 @@ async function oneClickGenerate() {
             faceLandmarker = null;
             logMem("MediaPipe closed");
         }
+        // Low-mem: yield to let GC collect MediaPipe memory before heavy BG removal
+        if (isLowMemDevice) {
+            await new Promise(r => setTimeout(r, 100));
+        }
 
         // Step 2: Background removal (skip if user opted out on mobile)
         if (dom.skipBgCheckbox && !dom.skipBgCheckbox.checked) {
@@ -1028,6 +1100,14 @@ async function oneClickGenerate() {
         // Step 3: Skip adjustments (use defaults for one-click)
         state.adjustedDataUrl = state.processedDataUrl;
         state.adjustments = { brightness: 100, contrast: 100, saturation: 100 };
+
+        // Low-mem: free original image (processedDataUrl is all we need from here)
+        if (isLowMemDevice && state.imageDataUrl && state.imageDataUrl !== state.processedDataUrl) {
+            revokeBlobUrl(state.imageDataUrl);
+            state.imageDataUrl = null;
+            logMem("imageDataUrl freed (one-click: no longer needed)");
+            await new Promise(r => setTimeout(r, 50));
+        }
 
         // Step 4: Set up crop with preset dimensions
         dom.widthInput.value = preset.width;
@@ -1121,7 +1201,7 @@ async function checkBackend() {
 // ---------------------------------------------------------------------------
 function getWorker() {
     if (!worker) {
-        worker = new Worker("static/worker.js?v=4", { type: "module" });
+        worker = new Worker("static/worker.js?v=5", { type: "module" });
     }
     return worker;
 }
@@ -1219,6 +1299,7 @@ async function runInferenceMainThread(imageDataUrl, processorSize) {
         rawImage.width,
         rawImage.height,
     );
+    maskData.dispose?.();  // Free intermediate mask tensor
 
     logMem("[main-thread] inference done");
     const resultData = { maskData: mask.data, width: rawImage.width, height: rawImage.height };
@@ -1396,12 +1477,21 @@ async function attemptInference(imageDataUrl, processorSize, useMainThread = fal
     logMem("removeBackground mask applied");
 
     const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
-    // Free the mask-application canvas (~4.8MB for a 1012x1200 image)
-    canvas.width = 0;
-    canvas.height = 0;
-    if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
+    if (isLowMemDevice) {
+        // Free the mask-application canvas (~4.8MB for a 1012x1200 image)
+        canvas.width = 0;
+        canvas.height = 0;
+    }
+    revokeBlobUrl(lastBlobUrl);
     lastBlobUrl = URL.createObjectURL(blob);
     logMem("removeBackground done (blob URL)");
+
+    // Low-mem: null out sourceImg and yield to GC before returning
+    if (isLowMemDevice) {
+        sourceImg = null;
+        await new Promise(r => setTimeout(r, 50));
+    }
+
     return lastBlobUrl;
 }
 
@@ -1471,7 +1561,7 @@ async function removeBackgroundBackend(file) {
     }
 
     const blob = await response.blob();
-    if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
+    revokeBlobUrl(lastBlobUrl);
     lastBlobUrl = URL.createObjectURL(blob);
     return lastBlobUrl;
 }
@@ -1665,6 +1755,13 @@ function attachEventListeners() {
     dom.manualAdjustButton.addEventListener("click", () => goToStep(4));
 
     dom.step5StartOver.addEventListener("click", () => {
+        // Revoke all blob URLs to free memory
+        revokeBlobUrl(state.imageDataUrl);
+        revokeBlobUrl(state.processedDataUrl);
+        revokeBlobUrl(state.adjustedDataUrl);
+        revokeBlobUrl(lastBlobUrl);
+        lastBlobUrl = null;
+
         state.imageFile = null;
         state.imageDataUrl = null;
         state.processedDataUrl = null;
@@ -1679,6 +1776,12 @@ function attachEventListeners() {
             dom.image.removeEventListener("wheel", wheelHandler);
             wheelHandler = null;
         }
+
+        // Clear DOM image sources to release decoded bitmaps
+        dom.previewImage.src = "";
+        dom.baBefore.src = "";
+        dom.baAfter.src = "";
+        dom.image.src = "";
 
         dom.dropZonePrompt.classList.remove("hidden");
         dom.uploadPreview.classList.add("hidden");
@@ -1707,12 +1810,21 @@ function attachEventListeners() {
         ectx.fillRect(0, 0, width, height);
         ectx.drawImage(croppedCanvas, 0, 0);
 
+        // Use JPEG on low-mem devices (much smaller), PNG elsewhere for lossless
+        const fmt = isLowMemDevice ? "image/jpeg" : "image/png";
+        const ext = isLowMemDevice ? "jpg" : "png";
         exportCanvas.toBlob((blob) => {
+            if (isLowMemDevice) {
+                exportCanvas.width = 0;
+                exportCanvas.height = 0;
+            }
+            const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = "photo_id.png";
+            link.href = url;
+            link.download = `photo_id.${ext}`;
             link.click();
-        }, "image/png");
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        }, fmt, isLowMemDevice ? 0.92 : undefined);
     });
 
     // Generate 4x6 Layout
@@ -1744,12 +1856,21 @@ function attachEventListeners() {
             }
         }
 
+        // Use JPEG on low-mem devices (much smaller than PNG for photo content)
+        const fmt = isLowMemDevice ? "image/jpeg" : "image/png";
+        const ext = isLowMemDevice ? "jpg" : "png";
         canvas.toBlob((blob) => {
+            if (isLowMemDevice) {
+                canvas.width = 0;
+                canvas.height = 0;
+            }
+            const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = "photo_id_4x6.png";
+            link.href = url;
+            link.download = `photo_id_4x6.${ext}`;
             link.click();
-        }, "image/png");
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        }, fmt, isLowMemDevice ? 0.92 : undefined);
     });
 
     // Keyboard navigation (only active on crop step)
