@@ -243,6 +243,10 @@ function getInferenceMode() {
     return document.querySelector('input[name="inference-mode"]:checked').value;
 }
 
+function revokeBlobUrl(url) {
+    if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+}
+
 function showStatus(message, type = "info") {
     dom.statusToast.className = "status-toast " + type;
     dom.statusText.textContent = message;
@@ -1219,6 +1223,7 @@ async function runInferenceMainThread(imageDataUrl, processorSize) {
         rawImage.width,
         rawImage.height,
     );
+    maskData.dispose?.();  // Free intermediate mask tensor
 
     logMem("[main-thread] inference done");
     const resultData = { maskData: mask.data, width: rawImage.width, height: rawImage.height };
@@ -1665,6 +1670,12 @@ function attachEventListeners() {
     dom.manualAdjustButton.addEventListener("click", () => goToStep(4));
 
     dom.step5StartOver.addEventListener("click", () => {
+        revokeBlobUrl(state.imageDataUrl);
+        revokeBlobUrl(state.processedDataUrl);
+        revokeBlobUrl(state.adjustedDataUrl);
+        revokeBlobUrl(lastBlobUrl);
+        lastBlobUrl = null;
+
         state.imageFile = null;
         state.imageDataUrl = null;
         state.processedDataUrl = null;
@@ -1708,10 +1719,12 @@ function attachEventListeners() {
         ectx.drawImage(croppedCanvas, 0, 0);
 
         exportCanvas.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
+            link.href = url;
             link.download = "photo_id.png";
             link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
         }, "image/png");
     });
 
@@ -1745,10 +1758,12 @@ function attachEventListeners() {
         }
 
         canvas.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
+            link.href = url;
             link.download = "photo_id_4x6.png";
             link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
         }, "image/png");
     });
 
