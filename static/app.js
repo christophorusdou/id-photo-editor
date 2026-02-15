@@ -1305,7 +1305,7 @@ function sendWorkerMessage(msg, transferables, timeoutMs = 0) {
 }
 
 async function preloadModel() {
-    const useMainThread = isIOS;
+    const useMainThread = isIOS || memoryTier.label === "low";
 
     if (useMainThread ? mainThreadModelReady : modelReady) {
         showStatus("Model already loaded.", "success");
@@ -1430,11 +1430,12 @@ async function attemptInference(imageDataUrl, processorSize, useMainThread = fal
 }
 
 async function removeBackgroundBrowser(imageDataUrl) {
-    // iOS kills the entire tab (not just the Worker) when a Worker exceeds
-    // memory, so the catch/fallback never runs. Use main thread directly —
-    // it has a much higher memory budget (~300-500MB vs ~100-150MB for Workers).
-    if (isIOS) {
-        console.log(`[bg-removal] iOS detected — using main thread (processor=${memoryTier.processorSize}px, dtype=${memoryTier.dtype})`);
+    // Low-tier devices (iPhones, low-RAM Android) use main thread directly:
+    // - iOS kills the entire tab when a Worker exceeds memory (no catch possible)
+    // - Low-RAM devices benefit from avoiding Worker overhead (~25MB WASM runtime)
+    // Main thread has a larger memory budget (~300-500MB vs ~100-150MB for Workers).
+    if (isIOS || memoryTier.label === "low") {
+        console.log(`[bg-removal] low-tier/iOS — using main thread (processor=${memoryTier.processorSize}px, dtype=${memoryTier.dtype})`);
         try {
             return await attemptInference(imageDataUrl, memoryTier.processorSize, true, memoryTier.dtype);
         } catch (err) {
